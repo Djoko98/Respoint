@@ -1,0 +1,56 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "ResPoint",
+  "version": "0.1.0",
+  "identifier": "com.respoint.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ResPoint - Restaurant Management System",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": true,
+        "decorations": false,
+        "transparent": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+  ,
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM3NDlFN0NFM0Q3OUZFNjIKUldSaS9uazl6dWRKTitxTjdqYVVFd2phck11RUNBZTFZU0pjZTcya1ExTTRUNkptUUdpR1o0c1YK
+      "endpoints": [
+        "https://example.com/tauri-updates/{{target}}/{{current_version}}"
+      ],
+      "dialog": false,
+      "windows": {
+        "installMode": "basicUi"
+      }
+    }
+  }
+}

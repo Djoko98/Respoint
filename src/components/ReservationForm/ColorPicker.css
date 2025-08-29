@@ -1,0 +1,184 @@
+/* Custom styles for react-colorful picker */
+.react-colorful {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.react-colorful__saturation {
+  border-radius: 8px;
+  height: 90px;
+  width: 100%;
+}
+
+.react-colorful__hue {
+  height: 16px;
+  border-radius: 8px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.react-colorful__pointer {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.react-colorful__hue-pointer {
+  width: 20px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Dark theme integration */
+.color-picker-container {
+  background: #1A2332;
+  border: 1px solid #3A4B5F;
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  position: relative;
+  z-index: 9999;
+  width: 200px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Ensure all children respect container width */
+.color-picker-container * {
+  box-sizing: border-box;
+}
+
+/* Title styling */
+.color-picker-container > div:first-child {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+/* Hex input container - integrated design */
+.hex-input-container {
+  background: rgba(15, 20, 25, 0.5);
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin-top: 6px;
+  margin-left: 0;
+  margin-right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(42, 59, 79, 0.5);
+  backdrop-filter: blur(2px);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Hex color preview */
+.hex-color-preview {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 2px solid #3A4B5F;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+/* Hex input field */
+.hex-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 12px;
+  padding: 3px 5px;
+  outline: none;
+  letter-spacing: 0.5px;
+  width: 100%;
+  min-width: 0;
+}
+
+.hex-input:focus {
+  color: #fff;
+}
+
+.hex-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-height: 600px) {
+  .react-colorful__saturation {
+    height: 70px;
+  }
+  
+  .react-colorful__hue {
+    height: 14px;
+    margin-top: 3px;
+  }
+  
+  .color-picker-container {
+    padding: 6px;
+  }
+  
+  .hex-input-container {
+    margin-top: 4px;
+    padding: 3px 4px;
+  }
+}
+
+@media (max-width: 640px) {
+  .color-picker-container {
+    position: fixed;
+    right: 10px;
+    left: auto;
+    max-width: calc(100vw - 20px);
+    width: 200px;
+    min-width: 160px;
+  }
+}
+
+/* Ensure scrollbar doesn't show unless needed */
+.color-picker-container {
+  overflow: visible;
+}
+
+.color-picker-container.scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar for dark theme */
+.color-picker-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.color-picker-container::-webkit-scrollbar-track {
+  background: #2A3B4F;
+  border-radius: 3px;
+}
+
+.color-picker-container::-webkit-scrollbar-thumb {
+  background: #3A4B5F;
+  border-radius: 3px;
+}
+
+.color-picker-container::-webkit-scrollbar-thumb:hover {
+  background: #4A5B6F;
+}
+
+/* Animation classes */
+.opacity-0 { opacity: 0; }
+.opacity-100 { opacity: 1; }
+.scale-95 { transform: scale(0.95); }
+.scale-100 { transform: scale(1); }
+.invisible { visibility: hidden; }
+.visible { visibility: visible; } 

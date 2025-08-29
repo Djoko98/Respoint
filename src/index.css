@@ -1,0 +1,455 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar styles for dark theme */
+.custom-scrollbar,
+.account-settings-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 #1F2937;
+}
+
+.custom-scrollbar::-webkit-scrollbar,
+.account-settings-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+.account-settings-scrollbar::-webkit-scrollbar-track {
+  background: #1F2937;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.account-settings-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.account-settings-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:active,
+.account-settings-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
+/* Statistics scrollbar styles */
+.statistics-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #1a1a1a #000814;
+}
+
+.statistics-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.statistics-scrollbar::-webkit-scrollbar-track {
+  background: #000814;
+  border-radius: 0;
+}
+
+.statistics-scrollbar::-webkit-scrollbar-thumb {
+  background: #1a1a1a;
+  border-radius: 0;
+  border: 1px solid #0A1929;
+  transition: all 0.2s ease;
+}
+
+.statistics-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+  border-color: #1E2A34;
+}
+
+.statistics-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #3a3a3a;
+}
+
+/* Light scrollbar with transparent background */
+.light-transparent-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 transparent;
+}
+
+.light-transparent-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.light-transparent-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 0;
+}
+
+.light-transparent-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  border: 1px solid #374151;
+  transition: all 0.2s ease;
+}
+
+.light-transparent-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+  border-color: #4B5563;
+}
+
+.light-transparent-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
+/* Table number scrollbar with no background */
+.table-number-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 transparent;
+}
+
+.table-number-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-number-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.table-number-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.table-number-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
+
+.table-number-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
+/* Sidebar scrollbar with transparent background */
+.sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 transparent;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
+@layer components {
+  .inputBase { @apply w-full bg-[#1E2A34] border border-[#2A3B4F] rounded-lg text-white text-sm px-3 py-2 focus:border-[#FFB800] outline-none transition; }
+  .btnAccent { @apply px-4 py-2 bg-[#FFB800] text-[#0A1929] rounded-lg font-medium hover:bg-[#FFB800]/90 transition; }
+  .btnGhost  { @apply px-4 py-2 bg-[#1E2A34] text-white rounded-lg font-medium hover:bg-[#2A3B4F] transition; }
+  .btnDanger { @apply px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition; }
+}
+
+.hide-number-arrows::-webkit-outer-spin-button,
+.hide-number-arrows::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.hide-number-arrows {
+  -moz-appearance: textfield;
+}
+
+/* Custom styles for the canvas text editor textarea */
+.canvas-text-editor {
+  background-color: #111827; /* gray-900 */
+  color: white;
+  border: 1px solid #374151; /* gray-700 */
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 14px;
+  min-width: 150px;
+  min-height: 80px;
+  resize: both;
+  outline: none;
+  transition: border-color 0.2s ease-in-out;
+}
+
+.canvas-text-editor:focus {
+  border-color: #3b82f6; /* blue-500 */
+}
+
+.canvas-text-editor::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.canvas-text-editor::-webkit-scrollbar-track {
+  background: #1f2937; /* gray-800 */
+  border-radius: 4px;
+}
+
+.canvas-text-editor::-webkit-scrollbar-thumb {
+  background: #4b5563; /* gray-600 */
+  border-radius: 4px;
+  border: 2px solid #1f2937; /* Add border to match track */
+}
+
+.canvas-text-editor::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; /* gray-500 */
+}
+
+.canvas-text-editor::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Fade in animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom transitions for buttons and links */
+.transition-button {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1F2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
+/* Rotation cursor */
+.cursor-rotate {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>') 12 12, grab;
+}
+
+/* Print Preview Styles for 58mm Thermal Printer Simulation */
+.print-preview {
+  width: 384px;
+  background: white;
+  padding: 16px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: black;
+  border: 1px solid #ccc;
+  image-rendering: pixelated;
+  line-height: 1.2;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.print-preview img.logo {
+  display: block;
+  margin: 0 auto 10px;
+  max-width: 100%;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* Fix for better thermal printer character spacing */
+.print-preview .space-y-1 > * + * {
+  margin-top: 4px;
+}
+
+/* Better text alignment for thermal printer look */
+.print-preview .flex.justify-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.print-preview .text-center {
+  text-align: center;
+}
+
+.print-preview .font-bold {
+  font-weight: bold;
+}
+
+.print-preview .text-xs {
+  font-size: 10px;
+}
+
+.print-preview .text-sm {
+  font-size: 12px;
+}
+
+.print-preview .uppercase {
+  text-transform: uppercase;
+}
+
+.print-preview .whitespace-pre-line {
+  white-space: pre-line;
+}
+
+.print-preview .leading-relaxed {
+  line-height: 1.5;
+}
+
+.print-preview .border-t {
+  border-top: 1px solid #333;
+}
+
+.print-preview .border-gray-300 {
+  border-color: #333;
+}
+
+.print-preview .pt-2 {
+  padding-top: 8px;
+}
+
+.print-preview .mt-1 {
+  margin-top: 4px;
+}
+
+.print-preview .mt-3 {
+  margin-top: 12px;
+}
+
+.print-preview .mt-4 {
+  margin-top: 16px;
+}
+
+.print-preview .mb-1 {
+  margin-bottom: 4px;
+}
+
+.print-preview .mb-2 {
+  margin-bottom: 8px;
+}
+
+.print-preview .mb-3 {
+  margin-bottom: 12px;
+}
+
+/* Thermal printer dithering effect simulation */
+.print-preview::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.02) 1px,
+    rgba(0, 0, 0, 0.02) 2px
+  );
+  pointer-events: none;
+}
+
+.print-preview {
+  position: relative;
+}
+
+@media print {
+  @page {
+    size: 58mm auto;
+    margin: 0mm;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area, .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  .print-preview {
+    border: none;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+    width: 100%; /* Fill the 58mm page width */
+  }
+}

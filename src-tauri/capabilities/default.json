@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "notification:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-is-focused",
+    "core:window:allow-request-user-attention",
+    "core:window:allow-start-dragging"
+  ],
+  "commands": {
+    "allow": [
+      "print_to_pos",
+      "set_taskbar_overlay"
+  ]
+  }
+}

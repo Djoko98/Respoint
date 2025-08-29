@@ -1,0 +1,62 @@
+.title-bar {
+  height: 30px;
+  background-color: #2b2b2b;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 1000;
+}
+
+.title-bar-left {
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  gap: 10px;
+}
+
+.title-bar-logo {
+  width: 20px;
+  height: 20px;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-title {
+  font-size: 13px;
+  color: #e0e0e0;
+  font-weight: 400;
+}
+
+.title-bar-buttons {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-button {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background-color: transparent;
+  color: #e0e0e0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.title-bar-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.title-bar-button.close-button:hover {
+  background-color: #e81123;
+}
+
+.title-bar-icon {
+  font-size: 10px;
+  font-family: 'Segoe MDL2 Assets', Arial, sans-serif;
+} 

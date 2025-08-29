@@ -1,0 +1,63 @@
+{
+    "name": "respoint",
+    "version": "1.0.0",
+    "description": "Restaurant management software",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "tauri": "tauri",
+        "tauri:dev": "tauri dev",
+        "tauri:build": "tauri build",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "restaurant",
+        "management",
+        "booking"
+    ],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@tauri-apps/api": "^2.6.0",
+        "@tauri-apps/cli": "^2.6.2",
+        "@types/node": "^20.16.13",
+        "@types/react": "^18.2.66",
+        "@types/react-dom": "^18.2.22",
+        "@types/uuid": "^9.0.8",
+        "@vitejs/plugin-react": "^4.0.0",
+        "autoprefixer": "^10.4.19",
+        "ico-endec": "^0.1.6",
+        "pngjs": "^7.0.0",
+        "postcss": "^8.4.49",
+        "sharp": "^0.34.2",
+        "tailwindcss": "^3.4.3",
+        "typescript": "^5.4.5",
+        "vite": "^4.5.0"
+    },
+    "dependencies": {
+        "@dnd-kit/core": "^6.3.1",
+        "@dnd-kit/modifiers": "^9.0.0",
+        "@dnd-kit/sortable": "^10.0.0",
+        "@dnd-kit/utilities": "^3.2.2",
+        "@radix-ui/react-dialog": "^1.0.5",
+        "@radix-ui/react-slot": "^1.0.2",
+        "@supabase/supabase-js": "^2.45.8",
+        "@tauri-apps/plugin-notification": "^2.2.0",
+        "@tauri-apps/plugin-updater": "^2.9.0",
+        "class-variance-authority": "^0.7.0",
+        "clsx": "^2.1.0",
+        "concurrently": "^8.2.2",
+        "framer-motion": "^12.23.0",
+        "lucide-react": "^0.357.0",
+        "react": "^18.2.0",
+        "react-colorful": "^5.6.1",
+        "react-dom": "^18.2.0",
+        "react-modal": "^3.16.1",
+        "react-router-dom": "^6.22.3",
+        "recharts": "^2.12.7",
+        "tailwind-merge": "^2.2.1",
+        "uuid": "^9.0.1"
+    }
+}
