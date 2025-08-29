@@ -1,0 +1,10 @@
+{
+  "version": "0.1.2",
+  "notes": "Update sa rotiranim ključevima.",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.2/ResPoint_0.1.2_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUb2dLZVRldEVlQnNBUkdmOEkvaVVTUWdrZmFMOEVNdjFyMG9xRGp0RmlKcytkbVdkUGthQUpjY2Q4Nklqcm40N0hZaEFjcUFZTWYvaXNYSUYzckVGZWZIdWhLSXZPamdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzU2NDYzNTE3CWZpbGU6UmVzUG9pbnRfMC4xLjJfeDY0LXNldHVwLmV4ZQp3ZkFZZUZwR0dlUlFFVGFSb1lzWTkzVUlkNVlLdzZmcDlQVWd5UHIyMENYRmFBTlBLaHNRWGhlU1NrcHBENnNlcWEwYXdhUW52ekdIa2Z1a0Z0L1pDQT09Cg=="
+    }
+  }
+}
