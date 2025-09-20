@@ -58,7 +58,7 @@ const OwnerInfoSection: React.FC<OwnerInfoSectionProps> = memo(({
             value={formData.name}
             onChange={(e) => onInputChange('name', e.target.value)}
             className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors"
-            placeholder="Enter owner's name"
+            placeholder={t('enterOwnerName')}
           />
         </div>
 

@@ -368,7 +368,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const profileTimeout = new Promise((_, reject) => {
       setTimeout(() => {
         reject(new Error('Profile fetch timeout'));
-      }, 3000); // 3 second timeout for profile fetch
+      }, 10000); // Increased to 10 seconds to reduce false timeouts
     });
     
     try {
@@ -386,8 +386,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (error && error.code !== 'PGRST116') {
         console.error('❌ Error fetching profile:', error);
-        // Set basic user data even if profile fetch fails
-        setUser({
+        // Preserve existing user (and logo) on error; if none, set minimal fallback
+        setUser((prev) => prev || {
           id: session.user.id,
           email: session.user.email || '',
           name: session.user.email?.split('@')[0] || 'User',
@@ -471,8 +471,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } catch (error) {
       console.error('❌ Unexpected error in fetchUserProfile:', error);
-      // Set basic user data to prevent infinite loading
-      setUser({
+      // Preserve existing user (and logo) on error; if none, set minimal fallback
+      setUser((prev) => prev || {
         id: session.user.id,
         email: session.user.email || '',
         name: session.user.email?.split('@')[0] || 'User',

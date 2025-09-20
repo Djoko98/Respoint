@@ -5,6 +5,7 @@ import AccountSettings from "../AccountSettings/AccountSettings";
 import Statistics from "../Statistics/Statistics";
 import Subscribe from "../Subscribe/Subscribe";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
+import { ThemeContext } from "../../context/ThemeContext";
 
 interface UserMenuProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
   const [showStatistics, setShowStatistics] = useState(false);
   const [showSubscribe, setShowSubscribe] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const { theme } = useContext(ThemeContext);
+  const isLight = theme === 'light';
 
   const handleLogout = () => {
     setShowLogoutModal(true);
@@ -81,7 +84,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
       ),
       label: t('logout'),
       action: handleLogout,
-      className: "text-red-400 hover:text-red-300"
+      className: isLight ? "text-red-600 hover:text-red-700" : "text-red-400 hover:text-red-300"
     }
   ];
 
@@ -97,19 +100,19 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
           />
           
           {/* Menu */}
-          <div className="absolute right-0 top-full mt-2 w-64 bg-gray-900 rounded-lg shadow-xl border border-gray-800 z-[80]">
+          <div className={`absolute right-0 top-full mt-2 w-64 rounded-lg shadow-xl border z-[80] ${isLight ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800'}`}>
             {/* User Info */}
-            <div className="p-4 border-b border-gray-800">
-              <p className="text-white font-medium truncate" title={user?.name}>{user?.name}</p>
+            <div className={`p-4 border-b ${isLight ? 'border-gray-200' : 'border-gray-800'}`}>
+              <p className={`${isLight ? 'text-gray-900' : 'text-white'} font-medium truncate`} title={user?.name}>{user?.name}</p>
               <p 
-                className="text-gray-400 text-sm truncate cursor-default" 
+                className={`${isLight ? 'text-gray-600' : 'text-gray-400'} text-sm truncate cursor-default`} 
                 title={user?.email}
               >
                 {user?.email}
               </p>
               {user?.restaurantName && (
                 <p 
-                  className="text-gray-500 text-xs mt-1 truncate" 
+                  className={`${isLight ? 'text-gray-500' : 'text-gray-500'} text-xs mt-1 truncate`} 
                   title={user.restaurantName}
                 >
                   {user.restaurantName}
@@ -135,8 +138,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
                     }}
                     className={`w-full px-4 py-3 flex items-center gap-3 transition ${
                       isDisabled
-                        ? 'text-gray-600 cursor-not-allowed'
-                        : (item.className || 'text-gray-300 hover:text-white hover:bg-gray-800')
+                        ? (isLight ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 cursor-not-allowed')
+                        : (item.className || (isLight ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-50' : 'text-gray-300 hover:text-white hover:bg-gray-800'))
                     }`}
                   >
                     {item.icon}

@@ -6,6 +6,7 @@ import { UserContext } from "../../context/UserContext";
 import { useLanguage } from "../../context/LanguageContext";
 import { setAssignedWaiter } from "../../utils/waiters";
 import { getZoomAdjustedScreenCoordinates } from "../../utils/zoom";
+import { ThemeContext } from "../../context/ThemeContext";
 
 interface SidebarFooterProps {
   onAddReservation: () => void;
@@ -18,6 +19,7 @@ interface WaiterItem { id?: string; name: string }
 const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
   const { user, activeRole } = useContext(UserContext);
   const { t, currentLanguage } = useLanguage();
+  const { theme } = useContext(ThemeContext);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [waiters, setWaiters] = useState<WaiterItem[]>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -269,7 +271,10 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
       {/* Guestbook button at 25% */}
       <button
         aria-label="Guestbook"
-        className="w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/60 hover:ring-2 hover:ring-white/80 absolute left-[25%] -translate-x-1/2 top-1/2 -translate-y-1/2"
+        className={
+          `w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 hover:ring-2 absolute left-[25%] -translate-x-1/2 top-1/2 -translate-y-1/2 ` +
+          (theme === 'light' ? 'focus:ring-black/40 hover:ring-black/30' : 'focus:ring-white/60 hover:ring-white/80')
+        }
         onClick={() => setIsGuestbookOpen(true)}
       >
         <BookOpen size={16} strokeWidth={2} />
@@ -289,7 +294,7 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
         ref={waiterBtnRef}
         aria-label="Manage waiters"
         aria-expanded={isPanelOpen}
-        className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none absolute left-[75%] -translate-x-1/2 top-1/2 -translate-y-1/2 ${activeRole === 'waiter' ? 'opacity-50 cursor-not-allowed' : 'focus:ring-2 focus:ring-white/60 hover:ring-2 hover:ring-white/80'}`}
+        className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none absolute left-[75%] -translate-x-1/2 top-1/2 -translate-y-1/2 ${activeRole === 'waiter' ? 'opacity-50 cursor-not-allowed' : `focus:ring-2 hover:ring-2 ${theme === 'light' ? 'focus:ring-black/40 hover:ring-black/30' : 'focus:ring-white/60 hover:ring-white/80'}`}`}
         onClick={() => {
           if (activeRole === 'waiter') return;
           setTimeout(() => {}, 0);
@@ -362,7 +367,7 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
                       onClick={() => removeWaiter(w, idx)}
                       className="absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-600 text-white hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400/60 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                     >
-                      <X size={10} strokeWidth={2} />
+                      <X size={10} strokeWidth={2} color="#FFFFFF" />
                     </button>
                   </div>
                 ))}

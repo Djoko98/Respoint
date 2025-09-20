@@ -52,19 +52,19 @@ const PrinterSettingsSection: React.FC<PrinterSettingsSectionProps> = () => {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-500">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l-4 4h3v4h2v-4h3L6 9zm12-4h-3V1h-2v4h-3l4 4 4-4z" />
         </svg>
-        POS štampač
+        {t('posPrinterTitle')}
       </h3>
 
       {!isTauri && (
-        <div className="text-xs text-gray-500 mb-3">Dostupno samo u desktop aplikaciji.</div>
+        <div className="text-xs text-gray-500 mb-3">{t('desktopOnlyNotice')}</div>
       )}
 
       {isTauri && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm text-white">Preferirani POS štampač</div>
-              <div className="text-xs text-gray-500 mt-1">Koristi se za direktnu štampu računa</div>
+              <div className="text-sm text-white">{t('preferredPosPrinter')}</div>
+              <div className="text-xs text-gray-500 mt-1">{t('preferredPosPrinterDescription')}</div>
             </div>
             <button
               onClick={fetchPrinters}
@@ -80,7 +80,7 @@ const PrinterSettingsSection: React.FC<PrinterSettingsSectionProps> = () => {
             onChange={(e) => setSelected(e.target.value)}
             className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors"
           >
-            <option value="">-- Izaberite štampač --</option>
+            <option value="">{t('choosePrinterPlaceholder')}</option>
             {printers.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -92,10 +92,10 @@ const PrinterSettingsSection: React.FC<PrinterSettingsSectionProps> = () => {
               className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
               disabled={!selected}
             >
-              Sačuvaj kao preferirani
+              {t('saveAsPreferred')}
             </button>
             {currentDefault && (
-              <div className="text-xs text-gray-500">Windows podrazumevani: <span className="text-gray-300">{currentDefault}</span></div>
+              <div className="text-xs text-gray-500">{t('windowsDefaultPrinter')} <span className="text-gray-300">{currentDefault}</span></div>
             )}
           </div>
 

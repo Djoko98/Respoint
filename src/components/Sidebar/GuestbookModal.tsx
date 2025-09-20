@@ -6,6 +6,7 @@ import { uploadGuestAvatar } from '../../services/storageService';
 import { storageService } from '../../services/storageService';
 import { supabase } from '../../utils/supabaseClient';
 import { useLanguage } from '../../context/LanguageContext';
+import { ThemeContext } from '../../context/ThemeContext';
 
 interface GuestbookModalProps {
   isOpen: boolean;
@@ -42,6 +43,9 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
   const tagInputRef = useRef<HTMLInputElement | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const { theme } = React.useContext(ThemeContext);
+  const isLight = theme === 'light';
 
   const normalizeUrl = (url?: string) => {
     const u = (url || '').trim();
@@ -127,20 +131,42 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
 
   const avatarPreviewUrl = normalizeUrl((isEdit ? form.avatarUrl : selected?.avatarUrl) || selected?.avatarUrl);
 
+  const panelContainerClass = isLight ? 'flex h-[70vh] bg-white text-[#0f172a]' : 'flex h-[70vh] bg-[#000814] text-white';
+  const leftPanelClass = isLight ? 'w-72 border-r border-gray-200 p-3 flex flex-col bg-white' : 'w-72 border-r border-[#1E2A34] p-3 flex flex-col bg-[#000814]';
+  const headerTextClass = isLight ? 'text-gray-700 text-sm' : 'text-gray-300 text-sm';
+  const addBtnClass = isLight ? 'px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50' : 'px-2 py-1 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10 disabled:opacity-50';
+  const searchInputClass = isLight ? 'w-full pl-8 pr-3 py-2 text-sm rounded bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400' : 'w-full pl-8 pr-3 py-2 text-sm rounded bg-[#0A1929] border border-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-gray-600';
+  const rightPanelClass = isLight ? 'flex-1 p-4 overflow-y-auto light-transparent-scrollbar bg-white' : 'flex-1 p-4 overflow-y-auto light-transparent-scrollbar bg-[#000814]';
+  const bigAvatarClass = isLight ? 'w-20 h-20 rounded-full bg-gray-300 overflow-hidden flex items-center justify-center text-gray-700' : 'w-20 h-20 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center';
+  const nameClass = isLight ? 'text-2xl text-gray-900 font-medium truncate' : 'text-2xl text-white font-medium truncate';
+  const vipBtnClass = isLight ? `p-1 rounded ${selected?.isVip ? 'text-yellow-500' : 'text-gray-400 hover:text-gray-600'}` : `p-1 rounded ${selected?.isVip ? 'text-yellow-500' : 'text-gray-500 hover:text-gray-300'}`;
+  const actionBtnClass = isLight ? 'px-2 py-1.5 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100' : 'px-2 py-1.5 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10';
+  const statsBorderClass = isLight ? 'border-t border-gray-200 pt-3' : 'border-t border-gray-800 pt-3';
+  const statsTitleClass = isLight ? 'text-gray-500 text-sm mb-2' : 'text-gray-400 text-sm mb-2';
+  const statsGridText = isLight ? 'text-sm text-gray-700' : 'text-sm text-gray-300';
+  const tagChipClass = isLight ? 'px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-xs flex items-center gap-1' : 'px-2 py-0.5 rounded-full bg-white/10 text-gray-200 text-xs flex items-center gap-1';
+  const tagRemoveClass = isLight ? 'text-gray-500 hover:text-gray-700' : 'text-gray-400 hover:text-white';
+  const tagAddBtnClass = isLight ? 'px-2 py-1 text-xs rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100' : 'px-2 py-1 text-xs rounded-full border border-gray-700 text-gray-200 hover:bg-white/10';
+  const tagInputClass = isLight ? 'px-3 py-1 text-xs rounded-full bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400' : 'px-3 py-1 text-xs rounded-full bg-[#0A1929] border border-gray-800 text-white placeholder-gray-500';
+  const inputClass = isLight ? 'px-3 py-2 rounded bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-400' : 'px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-gray-600';
+  const dangerBtnClass = isLight ? 'px-3 py-2 text-sm rounded bg-red-50 text-red-700 hover:bg-red-100' : 'px-3 py-2 text-sm rounded bg-red-900/40 text-red-300 hover:bg-red-900/60';
+  const footerBtnClass = isLight ? 'px-3 py-2 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-100' : 'px-3 py-2 text-sm rounded border border-gray-700 text-gray-300 hover:bg-white/10';
+  const saveBtnClass = isLight ? 'px-3 py-2 text-sm rounded bg-blue-600 text-blue-100 hover:bg-blue-500 disabled:opacity-50' : 'px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50';
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={currentLanguage === 'srb' ? 'Knjiga gostiju' : 'Guestbook'} size="xl">
-      <div className="flex h-[70vh]">
+      <div className={panelContainerClass}>
         {/* Left list */}
-        <div className="w-72 border-r border-gray-800 p-3 flex flex-col">
+        <div className={leftPanelClass}>
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-gray-300 text-sm">
+            <div className={`flex items-center gap-2 ${headerTextClass}`}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 4h18M3 10h18M3 16h18"/></svg>
               <span>{currentLanguage === 'srb' ? 'Gosti' : 'Guests'}</span>
             </div>
             <button
               onClick={handleAdd}
               disabled={isSaving}
-              className="px-2 py-1 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10 disabled:opacity-50"
+              className={addBtnClass}
             >
               {currentLanguage === 'srb' ? '+ Dodaj' : '+ Add'}
             </button>
@@ -148,28 +174,33 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
           <div className="mb-2">
             <div className="relative">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder={currentLanguage === 'srb' ? 'Pretraga po imenu ili telefonu' : 'Search by name or phone'} className="w-full pl-8 pr-3 py-2 text-sm rounded bg-[#0A1929] border border-gray-800 text-white"/>
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder={currentLanguage === 'srb' ? 'Pretraga po imenu ili telefonu' : 'Search by name or phone'} className={searchInputClass}/>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto light-transparent-scrollbar space-y-1">
-            {filtered.map(e => (
-              <button
-                key={e.id}
-                onClick={() => { setSelectedId(e.id); setIsEdit(false); }}
-                className={`w-full text-left px-2 py-2 rounded text-sm flex items-start gap-2 ${selectedId === e.id ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5'}`}
-              >
-                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
-                  {normalizeUrl(e.avatarUrl) ? <img src={normalizeUrl(e.avatarUrl)} alt="avatar" className="w-full h-full object-cover"/> : <span className="text-xs">{(e.name|| (currentLanguage === 'srb' ? 'Bez imena' : 'Unnamed')).slice(0,1)}</span>}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    <div className="truncate">{e.name || (currentLanguage === 'srb' ? 'Bez imena' : 'Unnamed')}</div>
-                    {e.isVip && <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-400"><path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/></svg>}
+            {filtered.map(e => {
+              const itemClass = isLight
+                ? (selectedId === e.id ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-50')
+                : (selectedId === e.id ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5');
+              return (
+                <button
+                  key={e.id}
+                  onClick={() => { setSelectedId(e.id); setIsEdit(false); }}
+                  className={`w-full text-left px-2 py-2 rounded text-sm flex items-start gap-2 ${itemClass}`}
+                >
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0 ${isLight ? 'bg-gray-300 text-gray-700' : 'bg-gray-700'}`}>
+                    {normalizeUrl(e.avatarUrl) ? <img src={normalizeUrl(e.avatarUrl)} alt="avatar" className="w-full h-full object-cover"/> : <span className="text-xs">{(e.name|| (currentLanguage === 'srb' ? 'Bez imena' : 'Unnamed')).slice(0,1)}</span>}
                   </div>
-                  {e.phone && <div className="text-xs text-gray-500 truncate">{e.phone}</div>}
-                </div>
-              </button>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <div className="truncate">{e.name || (currentLanguage === 'srb' ? 'Bez imena' : 'Unnamed')}</div>
+                      {e.isVip && <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500"><path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/></svg>}
+                    </div>
+                    {e.phone && <div className="text-xs text-gray-500 truncate">{e.phone}</div>}
+                  </div>
+                </button>
+              );
+            })}
             {filtered.length === 0 && entries.length === 0 && (
               <div className="text-gray-500 text-xs px-2 py-4">{currentLanguage === 'srb' ? 'Još uvek nema gostiju.' : 'No guests yet.'}</div>
             )}
@@ -180,37 +211,37 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Right detail */}
-        <div className="flex-1 p-4 overflow-y-auto light-transparent-scrollbar">
+        <div className={rightPanelClass}>
           {!selected ? (
             <div className="h-full flex items-center justify-center text-gray-500 text-sm">{currentLanguage === 'srb' ? 'Izaberite gosta da biste videli i uredili detalje.' : 'Select a guest to view and edit details.'}</div>
           ) : (
             <div className="max-w-3xl space-y-3">
               {/* Header with avatar, name, contact, VIP */}
               <div className="flex items-start gap-4">
-                <div className="w-20 h-20 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center">
+                <div className={bigAvatarClass}>
                   {avatarPreviewUrl && !avatarError ? (
                     <img src={avatarPreviewUrl} alt="" className="w-full h-full object-cover" onError={() => setAvatarError(true)} />
                   ) : (
-                    <span className="text-lg text-gray-300">{(selected.name||'?').slice(0,1)}</span>
+                    <span className="text-lg text-gray-500">{(selected.name||'?').slice(0,1)}</span>
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-2xl text-white font-medium truncate">{selected.name}</h3>
+                    <h3 className={nameClass}>{selected.name}</h3>
                     <button
                       onClick={async () => {
                         if (!selectedId) return;
                         const updated = await guestbookService.update(selectedId, { isVip: !selected.isVip });
                         if (updated) setEntries(prev => prev.map(e => e.id === updated.id ? updated : e));
                       }}
-                      className={`p-1 rounded ${selected.isVip ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={vipBtnClass}
                       title={selected.isVip ? 'VIP' : 'Mark as VIP'}
                     >
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/></svg>
                     </button>
                     <div className="ml-auto" />
                     <button
-                      className="px-2 py-1.5 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10"
+                      className={actionBtnClass}
                       title={currentLanguage === 'srb' ? 'Dodaj u rezervaciju' : 'Add to reservation'}
                       onClick={async () => {
                         try {
@@ -237,7 +268,7 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                       {currentLanguage === 'srb' ? 'Dodaj u rezervaciju' : 'Add to reservation'}
                     </button>
                   </div>
-                  <div className="flex items-center gap-4 text-gray-300 text-sm">
+                  <div className={isLight ? 'flex items-center gap-4 text-gray-700 text-sm' : 'flex items-center gap-4 text-gray-300 text-sm'}>
                     {selected.phone && (
                       <div className="flex items-center gap-1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.1 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.66 12.66 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.66 12.66 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>{selected.phone}</div>
                     )}
@@ -246,19 +277,19 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                     )}
                   </div>
                   {selected.isVip && (
-                    <div className="mt-2 text-yellow-400 text-xs">{currentLanguage === 'srb' ? 'Loyalty gost' : 'Loyalty guest'}</div>
+                    <div className="mt-2 text-yellow-500 text-xs">{currentLanguage === 'srb' ? 'Loyalty gost' : 'Loyalty guest'}</div>
                   )}
                   {/* Tags not displayed here; listed below */}
                 </div>
               </div>
 
               {/* Stats grid */}
-              <div className="border-t border-gray-800 pt-3">
-                <div className="text-gray-400 text-sm mb-2">{currentLanguage === 'srb' ? 'Statistika' : 'Statistics'}</div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 text-sm text-gray-300">
+              <div className={statsBorderClass}>
+                <div className={statsTitleClass}>{currentLanguage === 'srb' ? 'Statistika' : 'Statistics'}</div>
+                <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 ${statsGridText}`}>
                   <div>
                     <div className="text-gray-500 text-xs">{currentLanguage === 'srb' ? 'Poslednja poseta' : 'Last visit'}</div>
-                    <div>{selected.lastVisitAt ? new Date(selected.lastVisitAt).toLocaleDateString() : '-'}</div>
+                    <div>{selected.lastVisitAt ? new Date(selected.lastVisitAt).toLocaleDateString('en-GB') : '-'}</div>
                   </div>
                   <div>
                     <div className="text-gray-500 text-xs">{currentLanguage === 'srb' ? 'Ukupno poseta' : 'Total visits'}</div>
@@ -280,13 +311,13 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
 
                 {/* Tags list and add */}
                 <div className="mt-3">
-                  <div className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Tagovi' : 'Tags'}</div>
+                  <div className={isLight ? 'text-gray-500 text-xs mb-1' : 'text-gray-400 text-xs mb-1'}>{currentLanguage === 'srb' ? 'Tagovi' : 'Tags'}</div>
                   <div className="flex flex-wrap items-center gap-2">
                     {selected.tags && selected.tags.map(tag => (
-                      <span key={tag} className="px-2 py-0.5 rounded-full bg-white/10 text-gray-200 text-xs flex items-center gap-1">
+                      <span key={tag} className={tagChipClass}>
                         {tag}
                         <button
-                          className="text-gray-400 hover:text-white"
+                          className={tagRemoveClass}
                           onClick={async () => {
                             if (!selectedId) return;
                             const updated = await guestbookService.update(selectedId, { tags: (selected.tags || []).filter(t => t !== tag) });
@@ -300,7 +331,7 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                     ))}
                     {!isAddingTag ? (
                       <button
-                        className="px-2 py-1 text-xs rounded-full border border-gray-700 text-gray-200 hover:bg-white/10"
+                        className={tagAddBtnClass}
                         onClick={() => { setIsAddingTag(true); setTimeout(() => tagInputRef.current?.focus(), 0); }}
                         title={currentLanguage === 'srb' ? 'Dodaj tag' : 'Add tag'}
                       >
@@ -327,7 +358,7 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                           }
                         }}
                         placeholder={currentLanguage === 'srb' ? 'Dodaj tag' : 'Add tag'}
-                        className="px-3 py-1 text-xs rounded-full bg-[#0A1929] border border-gray-800 text-white"
+                        className={tagInputClass}
                       />
                     )}
                   </div>
@@ -336,16 +367,16 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Ime' : 'Name'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Ime' : 'Name'}</span>
+                  <input className={inputClass}
                          value={form.name}
                          onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
                 </label>
                 <div className="flex flex-col" role="group" aria-label="Profile picture">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Profilna slika' : 'Profile picture'}</span>
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Profilna slika' : 'Profile picture'}</span>
                   <div className="flex items-center gap-2">
                     <button
-                      className="px-2 py-2 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10"
+                      className={isLight ? 'px-2 py-2 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100' : 'px-2 py-2 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10'}
                       title={currentLanguage === 'srb' ? 'Otpremi sa računara' : 'Upload from file'}
                       onClick={() => fileInputRef.current?.click()}
                     >
@@ -353,7 +384,7 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                     </button>
                     {form.avatarUrl && (
                       <button
-                        className="px-2 py-2 text-xs rounded border border-gray-700 text-red-300 hover:bg-red-900/30"
+                        className={isLight ? 'px-2 py-2 text-xs rounded border border-red-300 text-red-600 hover:bg-red-50' : 'px-2 py-2 text-xs rounded border border-gray-700 text-red-300 hover:bg-red-900/30'}
                         title={currentLanguage === 'srb' ? 'Ukloni profilnu' : 'Remove avatar'}
                         onClick={async (e) => {
                           e.preventDefault();
@@ -395,74 +426,74 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                   }}
                 />
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Telefon' : 'Phone'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Telefon' : 'Phone'}</span>
+                  <input className={inputClass}
                          value={form.phone}
                          onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">Email</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">Email</span>
+                  <input className={inputClass}
                          value={form.email}
                          onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Učestalost poseta' : 'Visit frequency'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Učestalost poseta' : 'Visit frequency'}</span>
+                  <input className={inputClass}
                          value={form.visitFrequency}
                          onChange={e => setForm(f => ({ ...f, visitFrequency: e.target.value }))} />
                 </label>
                 <label className="col-span-2 flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Posebna veza' : 'Special relation'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Posebna veza' : 'Special relation'}</span>
+                  <input className={inputClass}
                          value={form.specialRelationNote}
                          onChange={e => setForm(f => ({ ...f, specialRelationNote: e.target.value }))} />
                 </label>
                 <label className="col-span-2 flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljeno sedenje' : 'Preferred seating'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljeno sedenje' : 'Preferred seating'}</span>
+                  <input className={inputClass}
                          value={form.preferredSeating}
                          onChange={e => setForm(f => ({ ...f, preferredSeating: e.target.value }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljena pića' : 'Favorite drinks'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljena pića' : 'Favorite drinks'}</span>
+                  <input className={inputClass}
                          value={form.favoriteDrinks}
                          onChange={e => setForm(f => ({ ...f, favoriteDrinks: e.target.value }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljena hrana' : 'Favorite foods'}</span>
-                  <input className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Omiljena hrana' : 'Favorite foods'}</span>
+                  <input className={inputClass}
                          value={form.favoriteFoods}
                          onChange={e => setForm(f => ({ ...f, favoriteFoods: e.target.value }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Prosečan račun' : 'Average bill'}</span>
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Prosečan račun' : 'Average bill'}</span>
                   <input type="number" min={0} step={1}
-                         className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white hide-number-arrows"
+                         className={`${inputClass} hide-number-arrows`}
                          value={form.averageBill ?? ''}
                          onChange={e => setForm(f => ({ ...f, averageBill: e.target.value as any }))} />
                 </label>
                 <label className="flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Poslednja poseta' : 'Last visit'}</span>
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Poslednja poseta' : 'Last visit'}</span>
                   <input type="date"
-                         className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                         className={inputClass}
                          value={form.lastVisitAt ? form.lastVisitAt.slice(0,10) : ''}
                          onChange={e => setForm(f => ({ ...f, lastVisitAt: e.target.value }))} />
                 </label>
                 <label className="col-span-2 flex flex-col">
-                  <span className="text-gray-400 text-xs mb-1">{currentLanguage === 'srb' ? 'Beleške / želje' : 'Notes / wishes'}</span>
+                  <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Beleške / želje' : 'Notes / wishes'}</span>
                   <textarea rows={4}
-                            className="px-3 py-2 rounded bg-[#0A1929] border border-gray-800 text-white"
+                            className={inputClass}
                             value={form.notes}
                             onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </label>
               </div>
-              <div className="flex justify-between pt-2 border-t border-gray-800 mt-2">
-                <button onClick={handleDelete} className="px-3 py-2 text-sm rounded bg-red-900/40 text-red-300 hover:bg-red-900/60">{currentLanguage === 'srb' ? 'Obriši' : 'Delete'}</button>
+              <div className={isLight ? 'flex justify-between pt-2 border-t border-gray-200 mt-2' : 'flex justify-between pt-2 border-t border-gray-800 mt-2'}>
+                <button onClick={handleDelete} className={dangerBtnClass}>{currentLanguage === 'srb' ? 'Obriši' : 'Delete'}</button>
                 <div className="flex gap-2">
-                  <button onClick={onClose} className="px-3 py-2 text-sm rounded border border-gray-700 text-gray-300 hover:bg-white/10">{currentLanguage === 'srb' ? 'Zatvori' : 'Close'}</button>
-                  <button onClick={handleSave} disabled={isSaving} className="px-3 py-2 text-sm rounded bg-blue-600/70 text-white hover:bg-blue-600 disabled:opacity-50">{currentLanguage === 'srb' ? 'Sačuvaj' : 'Save'}</button>
+                  <button onClick={onClose} className={footerBtnClass}>{currentLanguage === 'srb' ? 'Zatvori' : 'Close'}</button>
+                  <button onClick={handleSave} disabled={isSaving} className={saveBtnClass}>{currentLanguage === 'srb' ? 'Sačuvaj' : 'Save'}</button>
                 </div>
               </div>
             </div>

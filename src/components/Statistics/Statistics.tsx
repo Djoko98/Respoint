@@ -886,8 +886,8 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                     {topTables.length > 0 ? (
                       topTables.map((table, index) => {
                         const tableName = formatTableNames([table.table_id], zoneLayouts);
-                        return (
-                                                     <div key={table.table_id} className="flex items-center justify-between py-2 px-3 bg-gray-800/50 rounded">
+                      return (
+                                                     <div key={table.table_id} className="flex items-center justify-between py-2 px-3 bg-gray-800/50 rounded top-tables-item">
                              <div className="flex items-center gap-3">
                                <span className="text-xs font-medium text-gray-400 w-6">
                                  #{index + 1}

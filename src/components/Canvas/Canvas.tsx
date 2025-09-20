@@ -77,17 +77,17 @@ const LayoutList: React.FC<LayoutListProps> = ({
     if (!dateString) return 'No date';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'Invalid date';
-    return date.toLocaleDateString('en-US', { 
-      month: '2-digit', 
-      day: '2-digit', 
-      year: 'numeric' 
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
     });
   };
 
   return (
     <div className="absolute right-0 top-8 bottom-0 w-56 bg-[#000814] border-l border-[#1E2A34] shadow-2xl z-40 flex flex-col">
       <div className="px-3 py-2.5 border-b border-[#1E2A34] flex justify-between items-center">
-        <h3 className="text-white font-bold text-sm">{t('savedLayouts')}</h3>
+        <h3 className="text-white font-normal text-sm">{t('savedLayouts')}</h3>
         <div className="flex items-center gap-1">
           <button
             onClick={handleRefresh}
@@ -3840,7 +3840,14 @@ const Canvas: React.FC<CanvasProps> = ({
                   return list && list.length > 0 ? (
                     <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
-                        <span key={w} className="group relative px-1.5 py-0.5 rounded bg-black/50 text-white text-[10px] whitespace-nowrap pointer-events-auto">
+                        <span
+                          key={w}
+                          className={
+                            `waiter-chip group relative px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap pointer-events-auto ` +
+                            (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-black/30 text-white' : 'bg-black/50 text-white')
+                          }
+                          style={{ color: '#FFFFFF' }}
+                        >
                           {w}
                           <button
                             aria-label={`Remove ${w}`}
@@ -3853,9 +3860,12 @@ const Canvas: React.FC<CanvasProps> = ({
                                 try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name: null } })); } catch {}
                               }
                             }}
-                            className="absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-gray-600 text-white hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400/60 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                            className={
+                              `absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full focus:outline-none focus:ring-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition ` +
+                              (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-500 text-white hover:bg-gray-400 focus:ring-gray-300' : 'bg-gray-600 text-white hover:bg-gray-400 focus:ring-gray-400/60')
+                            }
                           >
-                            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#FFFFFF' : 'currentColor'} strokeWidth="3">
                               <path d="M18 6L6 18M6 6l12 12" />
                             </svg>
                           </button>
@@ -3893,7 +3903,36 @@ const Canvas: React.FC<CanvasProps> = ({
                   return list && list.length > 0 ? (
                     <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
-                        <span key={w} className="px-1.5 py-0.5 rounded bg-black/30 text-white text-[10px] whitespace-nowrap">{w}</span>
+                        <span
+                          key={w}
+                          className={
+                            `waiter-chip group relative px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap pointer-events-auto ` +
+                            (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-black/20 text-white' : 'bg-black/30 text-white')
+                          }
+                          style={{ color: '#FFFFFF' }}
+                        >
+                          {w}
+                          <button
+                            aria-label={`Remove ${w}`}
+                            title={`Remove ${w}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              if (reservationForTable) {
+                                removeAssignedWaiter(reservationForTable.id, w);
+                                try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name: null } })); } catch {}
+                              }
+                            }}
+                            className={
+                              `absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full focus:outline-none focus:ring-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition ` +
+                              (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-500 text-white hover:bg-gray-400 focus:ring-gray-300' : 'bg-gray-600 text-white hover:bg-gray-400 focus:ring-gray-400/60')
+                            }
+                          >
+                            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#FFFFFF' : 'currentColor'} strokeWidth="3">
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </span>
                       ))}
                     </div>
                   ) : null;
@@ -3976,7 +4015,7 @@ const Canvas: React.FC<CanvasProps> = ({
         }}
       >
         <div
-          className="text-white select-none h-full w-full flex items-center justify-center"
+          className="text-white canvas-text select-none h-full w-full flex items-center justify-center"
           style={{
             fontSize: `${text.fontSize}px`,
             padding: '4px',
@@ -5065,7 +5104,14 @@ const Canvas: React.FC<CanvasProps> = ({
             <div className="flex-1 bg-[#0A1929] relative">
       {/* Top Toolbar */}
       {isAuthenticated && (
-        <div className="absolute top-0 left-0 right-0 z-20 bg-[#000814] border-b border-[#1E2A34] px-4 py-1">
+        <div
+          className={
+            `absolute top-0 left-0 right-0 z-20 px-4 py-1 border-b ` +
+            (document.documentElement.getAttribute('data-theme') === 'light'
+              ? 'bg-white border-gray-200'
+              : 'bg-[#000814] border-[#1E2A34]')
+          }
+        >
           <div className="flex items-center justify-between">
             {/* Left side - Edit controls and tools */}
             <div className="flex items-center gap-3">
@@ -5074,7 +5120,12 @@ const Canvas: React.FC<CanvasProps> = ({
                 {!isEditing ? (
                   <button
                     onClick={toggleEditMode}
-                    className="px-4 py-0.5 text-white text-sm hover:bg-white/10 transition-colors rounded"
+                    className={
+                      `px-4 py-0.5 text-sm transition-colors rounded ` +
+                      (document.documentElement.getAttribute('data-theme') === 'light'
+                        ? 'text-gray-800 hover:bg-gray-100'
+                        : 'text-white hover:bg-white/10')
+                    }
                   >
                     {t('edit')}
                   </button>
@@ -5094,8 +5145,8 @@ const Canvas: React.FC<CanvasProps> = ({
                         disabled={!hasChanges}
                         className={`px-4 py-0.5 text-sm transition-colors rounded ${
                           hasChanges
-                            ? 'text-white hover:bg-white/10'
-                            : 'text-gray-500 cursor-not-allowed'
+                            ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                            : 'text-gray-400 cursor-not-allowed'
                         }`}
                       >
                         {t('updateLayout')}
@@ -5103,13 +5154,19 @@ const Canvas: React.FC<CanvasProps> = ({
                     )}
                     <button
                       onClick={() => setShowSaveLayoutModal(true)}
-                      className="px-4 py-0.5 text-white text-sm hover:bg-white/10 transition-colors rounded"
+                      className={
+                        `px-4 py-0.5 text-sm transition-colors rounded ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                      }
                     >
                       {t('saveLayoutAs')}
                     </button>
                     <button
                       onClick={handleCancel}
-                      className="px-4 py-0.5 text-white text-sm hover:bg-white/10 transition-colors rounded"
+                      className={
+                        `px-4 py-0.5 text-sm transition-colors rounded ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                      }
                     >
                       {t('cancel')}
                     </button>
@@ -5120,18 +5177,21 @@ const Canvas: React.FC<CanvasProps> = ({
               {/* Tools - visible when editing */}
               {isEditing && (
                 <>
-                  <div className="w-px h-6 bg-[#1E2A34]" />
+                  <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
                   
                   <div className="flex items-center gap-1">
                     {/* Move Tool */}
                     <button
                       onClick={() => onToolChange('select')}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'select' ? 'bg-white/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'select' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'select' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('moveToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
                       </svg>
                     </button>
@@ -5142,12 +5202,15 @@ const Canvas: React.FC<CanvasProps> = ({
                         onToolChange('table');
                         onAddTable('rectangle');
                       }}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'table' && tableType === 'rectangle' ? 'bg-white/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'table' && tableType === 'rectangle' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'table' && tableType === 'rectangle' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('squareTableTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
                       </svg>
                     </button>
@@ -5158,12 +5221,15 @@ const Canvas: React.FC<CanvasProps> = ({
                         onToolChange('table');
                         onAddTable('circle');
                       }}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'table' && tableType === 'circle' ? 'bg-white/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'table' && tableType === 'circle' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'table' && tableType === 'circle' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('roundTableTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <circle cx="12" cy="12" r="9" />
                       </svg>
                     </button>
@@ -5171,12 +5237,15 @@ const Canvas: React.FC<CanvasProps> = ({
                     {/* Wall Tool */}
                     <button
                       onClick={() => onToolChange('wall')}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'wall' ? 'bg-white/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'wall' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'wall' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('wallToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
                     </button>
@@ -5184,30 +5253,34 @@ const Canvas: React.FC<CanvasProps> = ({
                     {/* Text Tool */}
                     <button
                       onClick={() => onToolChange('text')}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'text' ? 'bg-white/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'text' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'text' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('textToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M4 7V4h16v3M9 20h6M12 4v16" />
                       </svg>
                     </button>
 
-                    <div className="w-px h-6 bg-[#1E2A34]" />
+                    <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
 
                     {/* Undo */}
                     <button
                       onClick={undo}
                       disabled={!canUndo}
-                      className={`p-1.5 rounded-md transition-all  ${
-                        canUndo
-                          ? 'hover:bg-white/10'
-                          : 'text-gray-500 cursor-not-allowed'
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all  ` +
+                        (canUndo
+                          ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white')
+                          : 'text-gray-400 cursor-not-allowed')
+                      }
                       title={t('undo')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'currentColor'} strokeWidth="2">
                         <path d="M9 14l-5-5 5-5"/>
                         <path d="M4 9h11.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>
                       </svg>
@@ -5217,30 +5290,34 @@ const Canvas: React.FC<CanvasProps> = ({
                     <button
                       onClick={redo}
                       disabled={!canRedo}
-                      className={`p-1.5 rounded-md transition-all ${
-                        canRedo
-                          ? 'hover:bg-white/10'
-                          : 'text-gray-500 cursor-not-allowed'
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (canRedo
+                          ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white')
+                          : 'text-gray-400 cursor-not-allowed')
+                      }
                       title={t('redo')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'currentColor'} strokeWidth="2">
                         <path d="M15 14l5-5-5-5"/>
                         <path d="M20 9H8.5A5.5 5.5 0 0 0 3 14.5v0A5.5 5.5 0 0 0 8.5 20H13"/>
                       </svg>
                     </button>
 
-                    <div className="w-px h-6 bg-[#1E2A34]" />
+                    <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
 
                     {/* Delete Tool */}
                     <button
                       onClick={() => onToolChange('delete')}
-                      className={`p-1.5 rounded-md transition-all hover:bg-white/10 ${
-                        selectedTool === 'delete' ? 'bg-red-500/20' : ''
-                      }`}
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light'
+                          ? `${selectedTool === 'delete' ? 'bg-red-100' : ''} hover:bg-gray-100 text-gray-700`
+                          : `${selectedTool === 'delete' ? 'bg-red-500/20' : ''} hover:bg-white/10 text-white`)
+                      }
                       title={t('deleteToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />
                       </svg>
                     </button>
@@ -5250,10 +5327,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => {
                         resetLayout();
                       }}
-                      className="p-1.5 rounded-md transition-all hover:bg-white/10"
+                      className={
+                        `p-1.5 rounded-md transition-all ` +
+                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white')
+                      }
                       title={t('resetAllTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" />
                       </svg>
                     </button>
@@ -5263,7 +5343,7 @@ const Canvas: React.FC<CanvasProps> = ({
                       <>
                         <div className="w-px h-6 bg-[#1E2A34]" />
                         <div className="flex items-center gap-1">
-                          <span className="text-white text-sm mr-1">{t('fontLabel')}</span>
+                          <span className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 text-sm mr-1' : 'text-white text-sm mr-1'}>{t('fontLabel')}</span>
                           <input
                             type="number"
                             value={(selectedElement as any).fontSize || 16}
@@ -5273,7 +5353,11 @@ const Canvas: React.FC<CanvasProps> = ({
                                 updateText(selectedElement.id, { fontSize: newSize });
                               }
                             }}
-                            className="w-12 text-sm bg-gray-900 text-white text-center rounded border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 hide-number-arrows"
+                            className={
+                              document.documentElement.getAttribute('data-theme') === 'light'
+                                ? 'w-12 text-sm bg-white text-gray-900 text-center rounded border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 hide-number-arrows'
+                                : 'w-12 text-sm bg-gray-900 text-white text-center rounded border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 hide-number-arrows'
+                            }
                             min="1"
                             onClick={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
@@ -5284,11 +5368,11 @@ const Canvas: React.FC<CanvasProps> = ({
                               const newSize = Math.max(1, currentSize - 1);
                               updateText(selectedElement.id, { fontSize: newSize });
                             }}
-                            className="p-0.5 rounded hover:bg-white/20"
+                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
                             onMouseDown={(e) => e.stopPropagation()}
                             title={t('decreaseFontSize')}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
                           </button>
                           <button
                             onClick={() => {
@@ -5296,11 +5380,11 @@ const Canvas: React.FC<CanvasProps> = ({
                               const newSize = currentSize + 1;
                               updateText(selectedElement.id, { fontSize: newSize });
                             }}
-                            className="p-0.5 rounded hover:bg-white/20"
+                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
                             onMouseDown={(e) => e.stopPropagation()}
                             title={t('increaseFontSize')}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
                           </button>
                         </div>
                       </>
@@ -5313,7 +5397,10 @@ const Canvas: React.FC<CanvasProps> = ({
             {/* Right side - Layouts button */}
             <button
               onClick={() => setShowLayoutList(!showLayoutList)}
-              className="px-4 py-0.5 text-white text-sm hover:bg-white/10 transition-colors rounded"
+              className={
+                `px-4 py-0.5 text-sm transition-colors rounded ` +
+                (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+              }
               title={t('savedLayouts')}
             >
               {t('layouts')}
@@ -5470,7 +5557,12 @@ const Canvas: React.FC<CanvasProps> = ({
         {/* Reservation Hover Card - only show when not editing */}
         {hoveredTable && !isEditing && (
           <div
-            className="absolute z-[70] px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-xl whitespace-nowrap border border-gray-700 select-none"
+            className={
+              `absolute z-[70] px-3 py-2 text-xs rounded-lg shadow-xl whitespace-nowrap select-none border ` +
+              (document.documentElement.getAttribute('data-theme') === 'light'
+                ? 'bg-white text-gray-900 border-gray-200'
+                : 'bg-gray-900 text-white border-gray-700')
+            }
             style={{
               left: `${hoveredTable.position.x + 15}px`,
               top: `${hoveredTable.position.y + 15}px`,
@@ -5478,13 +5570,13 @@ const Canvas: React.FC<CanvasProps> = ({
             }}
           >
             <div className="font-medium text-accent">{hoveredTable.reservation.guestName}</div>
-            <div className="text-gray-300 mt-1">{hoveredTable.reservation.time} - {hoveredTable.reservation.numberOfGuests} {t('guests')}</div>
+            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>{hoveredTable.reservation.time} - {hoveredTable.reservation.numberOfGuests} {t('guests')}</div>
             <div className={`text-xs px-2 py-1 rounded mt-1 ${
-              hoveredTable.reservation.status === 'waiting' ? 'bg-orange-500/20 text-orange-300' :
-              hoveredTable.reservation.status === 'confirmed' ? 'bg-blue-500/20 text-blue-300' :
-              hoveredTable.reservation.status === 'arrived' ? 'bg-green-500/20 text-green-300' : 
-              hoveredTable.reservation.status === 'not_arrived' ? 'bg-red-500/20 text-red-300' :
-              'bg-gray-500/20 text-gray-300'
+              hoveredTable.reservation.status === 'waiting' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/20 text-orange-300') :
+              hoveredTable.reservation.status === 'confirmed' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/20 text-blue-300') :
+              hoveredTable.reservation.status === 'arrived' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-green-100 text-green-700' : 'bg-green-500/20 text-green-300') : 
+              hoveredTable.reservation.status === 'not_arrived' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-red-100 text-red-700' : 'bg-red-500/20 text-red-300') :
+              (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700' : 'bg-gray-500/20 text-gray-300')
             }`}>
               {hoveredTable.reservation.status === 'waiting' ? t('waiting') :
                hoveredTable.reservation.status === 'confirmed' ? t('confirmed') :
@@ -5493,12 +5585,12 @@ const Canvas: React.FC<CanvasProps> = ({
                hoveredTable.reservation.status === 'cancelled' ? t('cancelled') :
                hoveredTable.reservation.status}
             </div>
-            <div className="text-gray-300">{t('tablesLabel')} {formatTableNames(hoveredTable.reservation.tableIds, zoneLayouts)}</div>
+            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('tablesLabel')} {formatTableNames(hoveredTable.reservation.tableIds, zoneLayouts)}</div>
             {hoveredTable.reservation.phone && (
-              <div className="text-gray-300">{t('telLabel')} {hoveredTable.reservation.phone}</div>
+              <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('telLabel')} {hoveredTable.reservation.phone}</div>
             )}
             {hoveredTable.reservation.notes && (
-              <div className="text-gray-300 italic mt-1">"{hoveredTable.reservation.notes}"</div>
+              <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-500 italic mt-1' : 'text-gray-300 italic mt-1'}>"{hoveredTable.reservation.notes}"</div>
             )}
           </div>
         )}

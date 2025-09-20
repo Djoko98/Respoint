@@ -56,7 +56,7 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
     const formatDate = (dateString: string) => {
       const date = new Date(dateString);
-      return date.toLocaleDateString('sr-RS', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
     const html = `
@@ -93,7 +93,7 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             <div class="center xs">
               Hvala Vam na rezervaciji i ukazanom poverenju!<br/>
               Radujemo se Vašoj poseti. <br/>
-              ${new Date().toLocaleDateString('sr-RS')} ${new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' })}
+              ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
           <script>
@@ -134,7 +134,7 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('sr-RS', {
+    return date.toLocaleDateString('en-GB', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric'

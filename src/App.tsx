@@ -24,6 +24,7 @@ import EmailConfirmationModal from './components/Auth/EmailConfirmationModal';
 import RoleUnlockModal from './components/Auth/RoleUnlockModal';
 import logoImage from './assets/logo.png';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ThemeProvider } from './context/ThemeContext';
 import { notificationService } from './services/notificationService';
 import { updaterService } from './services/updaterService';
 
@@ -98,6 +99,17 @@ const AppContent: React.FC = () => {
     checkAuthConfirmation();
   }, [isAuthenticated]);
 
+  // Initial sync of assigned waiters after login/startup so other devices pull existing assignments
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!isAuthenticated || !user?.id) return;
+        await syncAllAssignedWaitersFromServer();
+        try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: null, name: null } })); } catch {}
+      } catch {}
+    })();
+  }, [isAuthenticated, user?.id]);
+
   // Show role unlock after login when no activeRole is set
   useEffect(() => {
     if (isAuthenticated) {
@@ -126,6 +138,16 @@ const AppContent: React.FC = () => {
       }
     })();
   }, [isAuthenticated]);
+
+  // Also check for updates on app start (before login) so the prompt appears on the welcome screen
+  useEffect(() => {
+    (async () => {
+      const handle = await updaterService.checkForUpdate();
+      if (handle) {
+        setUpdateInfo({ version: handle.version, notes: handle.notes });
+      }
+    })();
+  }, []);
 
   const validateLoginForm = () => {
     const errors: {[key: string]: string} = {};
@@ -356,23 +378,33 @@ const AppContent: React.FC = () => {
       ) : (
         <>
           {/* Welcome screen without header */}
-          <div className="flex-1 flex items-center justify-center bg-[#000814]">
+          <div
+            className="flex-1 flex items-center justify-center bg-[#000814] relative"
+            style={{
+              backgroundImage: "url('/login-bg.jpg')",
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat'
+            }}
+          >
+            {/* Dark overlay for readability over the background image */}
+            <div className="absolute inset-0 bg-[#000814]/70" />
             <div className="w-full max-w-md px-6">
               {/* Logo and Title */}
-              <div className="text-center mb-12">
-                <div className="w-12 h-12 mx-auto mb-6">
+              <div className="text-center mb-12 relative z-10">
+                <div className="w-16 h-16 mx-auto mb-6">
                   <img 
                     src={logoImage} 
                     alt="ResPoint Logo" 
                     className="w-full h-full object-contain"
                   />
                 </div>
-                <h1 className="text-4xl font-light text-white mb-2">ResPoint</h1>
-                <p className="text-[#8891A7] text-sm">Restaurant Management System</p>
+                <h1 className="text-4xl font-light text-white mb-2 login-title">ResPoint</h1>
+                <p className="text-[#8891A7] text-sm login-subtitle">Restaurant Management System</p>
               </div>
 
               {/* Welcome/Login/Signup Views */}
-              <div className="bg-[#0A1929]/50 backdrop-blur-sm p-8 rounded-lg border border-[#1E2A34]">
+              <div className="bg-[#0A1929]/50 backdrop-blur-sm p-8 rounded-lg border border-[#1E2A34] relative z-10">
                 <AnimatePresence mode="wait">
                 {welcomeView === 'welcome' && (
                     <motion.div
@@ -394,13 +426,10 @@ const AppContent: React.FC = () => {
                       Log In to Your Account
                     </button>
 
-                    <div className="relative my-8">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-[#2A3B4F]"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-4 bg-[#061420] text-[#8891A7]">or</span>
-                      </div>
+                    <div className="my-8 flex items-center">
+                      <div className="flex-1 border-t border-[#2A3B4F]"></div>
+                      <span className="mx-4 text-sm text-[#8891A7]">or</span>
+                      <div className="flex-1 border-t border-[#2A3B4F]"></div>
                     </div>
 
                     <div className="text-center">
@@ -652,19 +681,19 @@ const AppContent: React.FC = () => {
 
               {/* Features - only show on welcome view */}
               {welcomeView === 'welcome' && (
-                <div className="mt-12 text-center">
+                <div className="mt-12 text-center relative z-10">
                   <div className="flex justify-center gap-12 text-[#8891A7] text-sm">
                     <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full"></div>
-                      <span>Easy Reservations</span>
+                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full login-feature-dot"></div>
+                      <span className="login-feature-text">Easy Reservations</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full"></div>
-                      <span>Table Management</span>
+                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full login-feature-dot"></div>
+                      <span className="login-feature-text">Table Management</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full"></div>
-                      <span>Real-time Updates</span>
+                      <div className="w-1.5 h-1.5 bg-[#8891A7] rounded-full login-feature-dot"></div>
+                      <span className="login-feature-text">Real-time Updates</span>
                     </div>
                   </div>
                 </div>
@@ -693,24 +722,26 @@ const AppContent: React.FC = () => {
 
 function App() {
   return (
-    <FocusProvider>
-      <UserProvider>
-        <LanguageProvider>
-        <ZoneProvider>
-          <ReservationProvider>
-            <LayoutProvider>
-              <div className="flex flex-col h-full bg-[#010A16]">
-                <TitleBar />
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <AppContent />
+    <ThemeProvider>
+      <FocusProvider>
+        <UserProvider>
+          <LanguageProvider>
+          <ZoneProvider>
+            <ReservationProvider>
+              <LayoutProvider>
+                <div className="flex flex-col h-full bg-[#010A16]">
+                  <TitleBar />
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <AppContent />
+                  </div>
                 </div>
-              </div>
-            </LayoutProvider>
-          </ReservationProvider>
-        </ZoneProvider>
-        </LanguageProvider>
-      </UserProvider>
-    </FocusProvider>
+              </LayoutProvider>
+            </ReservationProvider>
+          </ZoneProvider>
+          </LanguageProvider>
+        </UserProvider>
+      </FocusProvider>
+    </ThemeProvider>
   );
 }
 

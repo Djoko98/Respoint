@@ -116,7 +116,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
 
   if (!isAuthenticated) {
     return (
-      <div className="flex flex-col gap-3 p-4 bg-gray-900 border-r border-gray-800">
+      <div
+        className={
+          `flex flex-col gap-3 p-4 border-r ` +
+          (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
+        }
+      >
         <div className="text-gray-500 text-sm text-center">
           Please log in to edit
         </div>
@@ -125,7 +130,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
   }
 
   return (
-    <div className="flex flex-col gap-3 p-4 bg-gray-900 border-r border-gray-800">
+    <div
+      className={
+        `flex flex-col gap-3 p-4 border-r ` +
+        (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
+      }
+    >
       {/* Main tools */}
       <div className="flex flex-col gap-2">
         {tools.map((tool) => (
@@ -133,8 +143,8 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <button
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition ${
                 selectedTool === tool.id
-                  ? 'bg-accent text-white'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
+                  ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-yellow-100 text-yellow-800' : 'bg-accent text-white')
+                  : (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white')
               }`}
               onClick={() => {
                 if (tool.id === 'table') {
@@ -152,9 +162,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
 
             {/* Table type options */}
             {tool.id === 'table' && showTableOptions && (
-              <div className="absolute left-full ml-2 top-0 bg-gray-800 rounded-lg shadow-lg p-2 z-[80]">
+              <div className={
+                `absolute left-full ml-2 top-0 rounded-lg shadow-lg p-2 z-[80] ` +
+                (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border border-gray-200' : 'bg-gray-800')
+              }>
                 <button
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-700 text-gray-300 hover:text-white text-sm"
+                  className={
+                    `w-full flex items-center gap-2 px-3 py-2 rounded text-sm ` +
+                    (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
+                  }
                   onClick={() => {
                     onAddTable('rectangle');
                     setShowTableOptions(false);
@@ -167,7 +183,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
                   Rectangle
                 </button>
                 <button
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-700 text-gray-300 hover:text-white text-sm"
+                  className={
+                    `w-full flex items-center gap-2 px-3 py-2 rounded text-sm ` +
+                    (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
+                  }
                   onClick={() => {
                     onAddTable('circle');
                     setShowTableOptions(false);
@@ -188,9 +207,11 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Font size selector for text tool */}
       {selectedTool === 'text' && (
         <div className="mt-2">
-          <label className="text-xs text-gray-400">Font size</label>
+          <label className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-xs text-gray-500' : 'text-xs text-gray-400'}>Font size</label>
           <select 
-            className="w-full bg-gray-800 text-white rounded px-2 py-1 mt-1"
+            className={
+              document.documentElement.getAttribute('data-theme') === 'light' ? 'w-full bg-white text-gray-900 border border-gray-200 rounded px-2 py-1 mt-1' : 'w-full bg-gray-800 text-white rounded px-2 py-1 mt-1'
+            }
             value={fontSize}
             onChange={(e) => setFontSize(Number(e.target.value))}
           >
@@ -205,14 +226,17 @@ const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
       {/* Separator */}
-      <div className="border-t border-gray-700 my-2"></div>
+      <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t border-gray-200 my-2' : 'border-t border-gray-700 my-2'}></div>
 
       {/* Action tools */}
       <div className="flex flex-col gap-2">
         {actionTools.map((tool) => (
           <button
             key={tool.id}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white transition"
+            className={
+              `flex items-center gap-2 px-3 py-2 rounded-lg transition ` +
+              (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white')
+            }
             onClick={tool.action}
             title={tool.label}
           >

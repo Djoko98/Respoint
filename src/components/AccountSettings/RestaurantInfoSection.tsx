@@ -89,7 +89,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
             value={formData.restaurantName}
             onChange={(e) => onInputChange('restaurantName', e.target.value)}
             className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors"
-            placeholder="Enter restaurant name"
+            placeholder={t('enterRestaurantName')}
           />
         </div>
 
@@ -114,7 +114,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                   </svg>
-                  <p className="text-xs mt-1">No logo</p>
+                  <p className="text-xs mt-1">{t('noLogo')}</p>
                 </div>
               )}
             </div>
@@ -133,7 +133,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   disabled={isUploading}
                   className="px-3 py-1.5 text-sm border border-gray-700 text-gray-300 rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
-                  {isUploading ? 'Uploading...' : t('uploadLogo')}
+                  {isUploading ? t('uploading') : t('uploadLogo')}
                 </button>
                 {formData.logo && (
                   <button
@@ -144,9 +144,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   </button>
                 )}
               </div>
-              <p className="text-xs text-gray-600 mt-2">
-                PNG, JPG (Max 5MB)
-              </p>
+              <p className="text-xs text-gray-600 mt-2">{t('logoFileDescription')}</p>
             </div>
           </div>
         </div>
@@ -172,7 +170,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/>
                   </svg>
-                  <p className="text-xs mt-1">No print logo</p>
+                  <p className="text-xs mt-1">{t('noPrintLogo')}</p>
                 </div>
               )}
             </div>
@@ -191,7 +189,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   disabled={isPrintLogoUploading}
                   className="px-3 py-1.5 text-sm border border-gray-700 text-gray-300 rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
-                  {isPrintLogoUploading ? 'Uploading...' : t('uploadLogo')}
+                  {isPrintLogoUploading ? t('uploading') : t('uploadLogo')}
                 </button>
                 {formData.printLogoUrl && (
                   <button
