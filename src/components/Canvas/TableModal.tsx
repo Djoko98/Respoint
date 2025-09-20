@@ -172,7 +172,7 @@ const TableModal: React.FC<TableModalProps> = ({ table, onClose }) => {
                       <div>
                         <p className="text-white font-medium">{reservation.guestName}</p>
                         <p className="text-gray-400 text-sm">
-                          {new Date(reservation.date).toLocaleDateString()} at {reservation.time}
+                          {new Date(reservation.date).toLocaleDateString('en-GB')} at {reservation.time}
                         </p>
                         <p className="text-gray-400 text-sm">{reservation.numberOfGuests} guests</p>
                       </div>

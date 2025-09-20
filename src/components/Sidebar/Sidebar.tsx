@@ -7,6 +7,7 @@ import { LayoutContext } from "../../context/LayoutContext";
 import { useFocus } from "../../context/FocusContext";
 import { formatTableNames } from "../../utils/tableHelper";
 import { useLanguage } from "../../context/LanguageContext";
+import { ThemeContext } from "../../context/ThemeContext";
 
 interface SidebarProps {
   onAddReservation: () => void;
@@ -29,6 +30,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
   onStatusUpdate 
 }) => {
   const { t } = useLanguage();
+  const { theme } = React.useContext(ThemeContext);
   const [timeLeft, setTimeLeft] = useState('');
   const [isExpired, setIsExpired] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -93,7 +95,14 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
   // Regular countdown display
   if (!isExpired && timeLeft) {
     return (
-      <div className="flex items-center gap-1 px-2 py-1 rounded bg-orange-900/30 text-orange-400 hover:bg-orange-900/40 transition-colors">
+      <div
+        className={
+          `flex items-center gap-1 px-2 py-1 rounded transition-colors ` +
+          (theme === 'light'
+            ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+            : 'bg-orange-900/30 text-orange-400 hover:bg-orange-900/40')
+        }
+      >
         {/* Clock icon */}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10"/>
@@ -109,7 +118,10 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
     return (
       <div className="flex flex-col items-center gap-1">
         {/* Question */}
-        <div className="flex items-center gap-1 px-2 py-1 rounded bg-yellow-900/30 text-yellow-400 text-xs">
+        <div className={
+          `flex items-center gap-1 px-2 py-1 rounded text-xs ` +
+          (theme === 'light' ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400')
+        }>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10"/>
             <path d="m9,9a3,3,0,1,1,5.5,2c-.4.5-1.5,1-1.5,2"/>
@@ -122,7 +134,10 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
         <div className="flex items-center gap-1">
           <button
             onClick={(e) => { e.stopPropagation(); handleConfirmArrival(true); }}
-            className="p-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/50 transition-colors"
+            className={
+              `p-1 rounded transition-colors ` +
+              (theme === 'light' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-green-900/30 text-green-400 hover:bg-green-900/50')
+            }
             title={t('markAsArrived')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -131,7 +146,10 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleConfirmArrival(false); }}
-            className="p-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors"
+            className={
+              `p-1 rounded transition-colors ` +
+              (theme === 'light' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-red-900/30 text-red-400 hover:bg-red-900/50')
+            }
             title={t('markAsNotArrived')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -149,6 +167,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = React.memo(({
 
 const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEditReservation }) => {
   const { t } = useLanguage();
+  const { theme } = useContext(ThemeContext);
   const { reservations, updateReservation } = useContext(ReservationContext);
   const { zones } = useContext(ZoneContext);
   const { zoneLayouts } = useContext(LayoutContext);
@@ -273,9 +292,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
     } else if (date.toDateString() === tomorrow.toDateString()) {
       return t('tomorrow');
     } else {
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric' 
+      // dd/MM/yyyy for consistency
+      return date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
       });
     }
   };
@@ -381,7 +402,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('search')}
-            className="w-full pl-10 pr-4 py-2.5 bg-[#0A1929] text-white placeholder-gray-500 rounded-lg border border-gray-800 focus:border-gray-600 focus:outline-none transition-colors"
+            className={
+              `w-full pl-10 pr-4 py-2.5 rounded-lg focus:outline-none transition-colors ` +
+              (theme === 'light'
+                ? 'bg-white text-gray-900 placeholder-gray-400 border border-gray-300 focus:border-gray-400'
+                : 'bg-[#0A1929] text-white placeholder-gray-500 border border-gray-800 focus:border-gray-600')
+            }
           />
         </div>
 
@@ -480,7 +506,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
                 onClick={() => handleReservationClick(reservation)}
                 onDragOver={handleReservationDragOver}
                 onDrop={(e) => handleReservationDrop(reservation.id, e)}
-                className="bg-[#0A1929] rounded-lg hover:bg-[#0A1929]/80 transition-colors cursor-pointer relative overflow-hidden border border-gray-800"
+                className={
+                  `rounded-lg transition-colors cursor-pointer relative overflow-hidden border ` +
+                  (theme === 'light'
+                    ? 'bg-white hover:bg-gray-50 border-gray-200'
+                    : 'bg-[#0A1929] hover:bg-[#0A1929]/80 border-gray-800')
+                }
                 data-reservation-id={reservation.id}
               >
                 {/* Color indicator */}
@@ -493,7 +524,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
                 
                 <div className="p-4 pl-6">
                   <div className="flex justify-between items-start mb-2">
-                    <h4 className="text-white font-medium">
+                    <h4 className={theme === 'light' ? 'text-gray-900 font-medium' : 'text-white font-medium'}>
                       {reservation.guestName}
                     </h4>
                     {reservation.status === 'waiting' ? (
@@ -508,14 +539,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
                       onClick={(e) => handleStatusClick(e, reservation)}
                       className={`px-2 py-1 rounded text-xs cursor-pointer transition-colors ${
                         reservation.status === 'confirmed' 
-                          ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/40'
-                            : reservation.status === 'arrived'
-                          ? 'bg-green-900/30 text-green-400 hover:bg-green-900/40'
-                            : reservation.status === 'not_arrived'
-                          ? 'bg-red-900/30 text-red-400 hover:bg-red-900/40'
-                            : reservation.status === 'cancelled'
-                          ? 'bg-gray-900/30 text-gray-400 cursor-default'
-                          : 'bg-gray-700 text-gray-300'
+                          ? (theme === 'light' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-blue-900/30 text-blue-400 hover:bg-blue-900/40')
+                          : reservation.status === 'arrived'
+                          ? (theme === 'light' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-green-900/30 text-green-400 hover:bg-green-900/40')
+                          : reservation.status === 'not_arrived'
+                          ? (theme === 'light' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-red-900/30 text-red-400 hover:bg-red-900/40')
+                          : reservation.status === 'cancelled'
+                          ? (theme === 'light' ? 'bg-gray-100 text-gray-600' : 'bg-gray-900/30 text-gray-400 cursor-default')
+                          : (theme === 'light' ? 'bg-gray-200 text-gray-700' : 'bg-gray-700 text-gray-300')
                       }`}
                     >
                         {reservation.status === 'not_arrived' ? (
@@ -549,40 +580,40 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
                   </div>
                   
                   {/* Main info line: time, guests, table */}
-                  <div className="flex items-center gap-4 text-sm text-gray-300 mb-1">
-                    <span className="font-medium">{reservation.time}</span>
+                  <div className={theme === 'light' ? 'flex items-center gap-4 text-sm text-gray-700 mb-1' : 'flex items-center gap-4 text-sm text-gray-300 mb-1'}>
+                    <span className={theme === 'light' ? 'font-medium text-gray-800' : 'font-medium'}>{reservation.time}</span>
                     
                     <div className="flex items-center gap-1">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={theme === 'light' ? 'text-gray-400' : 'text-gray-400'}>
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                         <circle cx="9" cy="7" r="4"/>
                         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
                         <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                       </svg>
-                      <span>{reservation.numberOfGuests}</span>
+                      <span className={theme === 'light' ? 'text-gray-700' : undefined}>{reservation.numberOfGuests}</span>
                     </div>
                     
                     {reservation.tableIds && reservation.tableIds.length > 0 && (
                       <div className="flex items-center gap-1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={theme === 'light' ? 'text-gray-400' : 'text-gray-400'}>
                           <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
                           <line x1="8" y1="21" x2="16" y2="21"/>
                           <line x1="12" y1="17" x2="12" y2="21"/>
                         </svg>
-                        <span>{formatTableNames(reservation.tableIds, zoneLayouts)}</span>
+                        <span className={theme === 'light' ? 'text-gray-700' : undefined}>{formatTableNames(reservation.tableIds, zoneLayouts)}</span>
                       </div>
                     )}
                   </div>
                   
                   {/* Secondary info line: service type and zone */}
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <div className={theme === 'light' ? 'flex items-center gap-4 text-xs text-gray-500' : 'flex items-center gap-4 text-xs text-gray-500'}>
                     {reservation.notes && (
-                      <span>{reservation.notes}</span>
+                      <span className={theme === 'light' ? 'text-gray-500' : undefined}>{reservation.notes}</span>
                     )}
                     {reservation.zoneId && (
                       <>
                         {reservation.notes && <span>•</span>}
-                        <span>{zones.find(z => z.id === reservation.zoneId)?.name || 'Unknown Zone'}</span>
+                        <span className={theme === 'light' ? 'text-gray-500' : undefined}>{zones.find(z => z.id === reservation.zoneId)?.name || 'Unknown Zone'}</span>
                       </>
                     )}
                   </div>
@@ -594,15 +625,21 @@ const Sidebar: React.FC<SidebarProps> = ({ onAddReservation, selectedDate, onEdi
                     return (
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {list.map((w) => (
-                          <span key={w} className="group relative inline-flex items-center text-[10px] pl-1.5 pr-1.5 py-0.5 rounded bg-[#0F243A] border border-gray-800 text-gray-300">
+                          <span key={w} className={
+                            `group relative inline-flex items-center text-[10px] pl-1.5 pr-1.5 py-0.5 rounded border ` +
+                            (theme === 'light' ? 'bg-gray-100 border-gray-300 text-gray-700' : 'bg-[#0F243A] border-gray-800 text-gray-300')
+                          }>
                             <span className="pr-1">{w}</span>
                             <button
                               aria-label={`Remove ${w}`}
                               title={`Remove ${w}`}
                               onClick={(e) => handleRemoveWaiter(reservation.id, e, w)}
-                              className="absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-gray-600 text-white hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400/60 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                              className={
+                                `absolute -top-1 -right-1 z-10 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-white focus:outline-none focus:ring-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition ` +
+                                (theme === 'light' ? 'bg-gray-500 hover:bg-gray-400 focus:ring-gray-400/60' : 'bg-gray-600 hover:bg-gray-400 focus:ring-gray-400/60')
+                              }
                             >
-                              <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke={theme === 'light' ? '#FFFFFF' : 'currentColor'} strokeWidth="3">
                                 <path d="M18 6L6 18M6 6l12 12" />
                               </svg>
                             </button>

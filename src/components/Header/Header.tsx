@@ -4,9 +4,11 @@ import { UserContext } from "../../context/UserContext";
 import { ReservationContext } from "../../context/ReservationContext";
 import { useLanguage } from "../../context/LanguageContext";
 import UserMenuTrigger from "../UserMenu/UserMenuTrigger";
+import RoleUnlockModal from "../Auth/RoleUnlockModal";
 import LoginModal from "../Auth/LoginModal";
 import SignupModal from "../Auth/SignupModal";
 import logoImage from "../../assets/logo.png";
+import { ThemeContext } from "../../context/ThemeContext";
 
 interface HeaderProps {
   selectedDate: Date;
@@ -18,21 +20,25 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const { isAuthenticated, user } = useContext(UserContext);
   const { reservations } = useContext(ReservationContext);
   const { t, getMonthNames, getDayNames } = useLanguage();
+  const { theme, toggleTheme } = useContext(ThemeContext);
   const [centerDate, setCenterDate] = useState(selectedDate);
   const calendarRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [logoKey, setLogoKey] = useState(Date.now()); // For cache-busting
+  const [logoRetryAttempted, setLogoRetryAttempted] = useState(false);
   
   // Auth modal states
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
+  const [showRoleUnlock, setShowRoleUnlock] = useState(false);
 
   // Update logoKey when user logo changes to force refresh
   useEffect(() => {
     if (user?.logo) {
       setLogoKey(Date.now());
+      setLogoRetryAttempted(false); // reset retry when logo changes
     }
   }, [user?.logo]);
 
@@ -153,8 +159,14 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
               alt={user?.restaurantName || "Logo"} 
               className="w-20 h-20 object-contain rounded-lg"
               onError={(e) => {
-                console.error('Logo failed to load, falling back to default:', getLogoUrl());
-                // Fallback to default logo on error
+                console.error('Logo failed to load:', getLogoUrl());
+                // One retry with cache-busting before falling back to default
+                if (user?.logo && !logoRetryAttempted) {
+                  setLogoRetryAttempted(true);
+                  setLogoKey(Date.now()); // trigger re-render with new query param
+                  return; // let React re-render the img with new src
+                }
+                // Fallback to default logo after retry
                 e.currentTarget.src = logoImage;
               }}
             />
@@ -219,6 +231,28 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                   if (index === 2 || index === 4) return 0.7; // Third and third-to-last - moderately faded
                   return 1; // Center (index 3)
                 };
+                const getBackground = (): string => {
+                  const isLight = theme === 'light';
+                  if (isToday) {
+                    if (hasReservations) {
+                      return isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                    }
+                    return isLight
+                      ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
+                      : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                  }
+                  if (isCenter) {
+                    if (hasReservations) {
+                      return isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                    }
+                    return isLight ? '#f1f5f9' : '#1E2A34';
+                  }
+                  return isLight ? '#f8fafc' : '#1E2A34';
+                };
                 
                 return (
                   <div
@@ -235,22 +269,14 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                       ${hasReservations && !isCenter && !isToday ? 'border-2 border-orange-500' : ''}
                     `}
                     style={{
-                      background: isToday
-                        ? hasReservations
-                          ? "linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)"
-                          : "linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)"
-                        : isCenter
-                        ? hasReservations
-                          ? "linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)"
-                          : "#1E2A34"
-                        : "#1E2A34", // Non-center, non-today dates always have basic background
+                      background: getBackground(),
                       opacity: getOpacity(idx)
                     }}
                   >
-                    <span className={`uppercase text-[#8891A7] ${isCenter ? "text-[10px]" : "text-[9px]"}`}>
+                    <span className={`uppercase ${isCenter ? "text-[10px]" : "text-[9px]"}`} style={{ color: theme === 'light' ? '#64748b' : '#8891A7' }}>
                       {dayOfWeek}
                     </span>
-                    <span className={`text-white ${isCenter ? "text-[24px]" : "text-[20px]"} font-normal leading-tight mt-0.5`}>
+                    <span className={`${isCenter ? "text-[24px]" : "text-[20px]"} font-normal leading-tight mt-0.5`} style={{ color: theme === 'light' ? '#0f172a' : '#ffffff' }}>
                       {date.getDate()}
                     </span>
                   </div>
@@ -283,8 +309,57 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
           </button>
         </div>
 
-        {/* Right: Auth and User Icon */}
+        {/* Right: Theme toggle, Auth and User Icon */}
         <div className="flex items-center gap-3">
+          {/* Theme switch (icon-only) */}
+          <button
+            onClick={toggleTheme}
+            className="relative inline-flex items-center w-12 h-6 rounded-full border border-[#F29809] transition-colors focus:outline-none focus:ring-2 focus:ring-[#FFB800]/40"
+            title={theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
+            aria-label="Toggle theme"
+          >
+            {/* Track - gold accent, always visible */}
+            <span className="absolute inset-0 rounded-full bg-[#FFB800]" />
+            {/* Icons (always visible) */}
+            <span className="absolute inset-y-0 left-1.5 z-10 text-[#0A1929] flex items-center">
+              {/* Sun icon */}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-90 drop-shadow">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5.64 5.64l-1.41-1.41M19.78 19.78l-1.41-1.41M5.64 18.36l-1.41 1.41M19.78 4.22l-1.41 1.41" />
+              </svg>
+            </span>
+            <span className="absolute inset-y-0 right-1.5 z-10 text-[#0A1929] flex items-center">
+              {/* Moon icon */}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-90 drop-shadow">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            </span>
+            {/* Knob */}
+            <span
+              className={`absolute top-1 left-1.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                theme === 'dark'
+                  ? 'translate-x-[20px] -translate-y-[1px]'
+                  : '-translate-x-[2px] -translate-y-[1px]'
+              }`}
+            />
+          </button>
+          {/* Role switch button */}
+          <button
+            onClick={() => setShowRoleUnlock(true)}
+            className={`${
+              theme === 'light'
+                ? 'w-8 h-8 flex items-center justify-center rounded-full bg-gray-0 text-gray-900 hover:bg-gray-100 border border-gray-200 transition'
+                : 'w-8 h-8 flex items-center justify-center rounded-full border border-gray-800 text-white/80 hover:text-white hover:bg-white/10 transition'
+            }`}
+            title="Change role"
+            aria-label="Change role"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 12c2.761 0 5-2.239 5-5S14.761 2 12 2 7 4.239 7 7s2.239 5 5 5z" />
+              <path d="M2 22a10 10 0 0 1 20 0" />
+            </svg>
+          </button>
+
           {!isAuthenticated && (
             <button
               onClick={() => setShowLoginModal(true)}
@@ -314,6 +389,12 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
           setShowSignupModal(false);
           setShowLoginModal(true);
         }}
+      />
+
+      {/* Role Unlock Modal */}
+      <RoleUnlockModal
+        isOpen={showRoleUnlock}
+        onClose={() => setShowRoleUnlock(false)}
       />
     </header>
   );

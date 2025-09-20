@@ -190,14 +190,14 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                           <div className="flex items-center gap-2">
                               <span className="text-gray-500">{t('started')}:</span>
                             <span className="text-gray-300">
-                              {new Date(currentSubscription.starts_at).toLocaleDateString()}
+                              {new Date(currentSubscription.starts_at).toLocaleDateString('en-GB')}
                             </span>
                           </div>
                           {currentSubscription.ends_at && (
                             <div className="flex items-center gap-2">
                                 <span className="text-gray-500">{t('ends')}:</span>
                               <span className="text-gray-300">
-                                {new Date(currentSubscription.ends_at).toLocaleDateString()}
+                                {new Date(currentSubscription.ends_at).toLocaleDateString('en-GB')}
                               </span>
                             </div>
                           )}

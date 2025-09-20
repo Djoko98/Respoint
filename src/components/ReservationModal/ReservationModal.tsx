@@ -80,11 +80,10 @@ const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onClose, re
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'long',
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    return date.toLocaleDateString('en-GB', { 
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
     });
   };
 
@@ -145,7 +144,7 @@ const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onClose, re
                reservation.status.charAt(0).toUpperCase() + reservation.status.slice(1)}
             </span>
             <span className="text-gray-500 text-xs">
-              {t('created')} {new Date(reservation.createdAt).toLocaleDateString()}
+              {t('created')} {new Date(reservation.createdAt).toLocaleDateString('en-GB')}
             </span>
           </div>
         </div>

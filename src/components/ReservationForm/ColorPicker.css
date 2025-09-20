@@ -52,6 +52,13 @@
   align-items: stretch;
 }
 
+/* Light theme integration */
+html[data-theme='light'] .color-picker-container {
+  background: #ffffff;
+  border: 1px solid #E5E7EB; /* gray-200 */
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
 /* Ensure all children respect container width */
 .color-picker-container * {
   box-sizing: border-box;
@@ -81,6 +88,12 @@
   box-sizing: border-box;
 }
 
+html[data-theme='light'] .hex-input-container {
+  background: #F9FAFB; /* gray-50 */
+  border: 1px solid #E5E7EB; /* gray-200 */
+  backdrop-filter: none;
+}
+
 /* Hex color preview */
 .hex-color-preview {
   width: 22px;
@@ -89,6 +102,10 @@
   border: 2px solid #3A4B5F;
   flex-shrink: 0;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme='light'] .hex-color-preview {
+  border: 2px solid #E5E7EB; /* gray-200 */
 }
 
 /* Hex input field */
@@ -112,6 +129,18 @@
 
 .hex-input::placeholder {
   color: rgba(255, 255, 255, 0.3);
+}
+
+html[data-theme='light'] .hex-input {
+  color: #111827; /* gray-900 */
+}
+
+html[data-theme='light'] .hex-input:focus {
+  color: #111827;
+}
+
+html[data-theme='light'] .hex-input::placeholder {
+  color: #9CA3AF; /* gray-400 */
 }
 
 /* Responsive adjustments */
@@ -173,6 +202,18 @@
 
 .color-picker-container::-webkit-scrollbar-thumb:hover {
   background: #4A5B6F;
+}
+
+html[data-theme='light'] .color-picker-container::-webkit-scrollbar-track {
+  background: #F3F4F6; /* gray-100 */
+}
+
+html[data-theme='light'] .color-picker-container::-webkit-scrollbar-thumb {
+  background: #D1D5DB; /* gray-300 */
+}
+
+html[data-theme='light'] .color-picker-container::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF; /* gray-400 */
 }
 
 /* Animation classes */

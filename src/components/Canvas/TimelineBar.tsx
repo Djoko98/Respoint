@@ -256,34 +256,38 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
                   />
                   
                   {/* Tooltip */}
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border border-gray-700 pointer-events-none select-none">
+                  <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border pointer-events-none select-none ${
+                    document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white text-gray-900 border-gray-200' : 'bg-gray-900 text-white border-gray-700'
+                  }`}>
                   <div className="font-medium text-accent">{reservation.guestName}</div>
-                  <div className="text-gray-300 mt-1">{reservation.time} - {reservation.numberOfGuests} {t('guests')}</div>
+                  <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>{reservation.time} - {reservation.numberOfGuests} {t('guests')}</div>
                   <div className={`text-xs px-2 py-1 rounded mt-1 ${
-                    reservation.status === 'waiting' ? 'bg-orange-500/20 text-orange-300' :
-                    reservation.status === 'confirmed' ? 'bg-blue-500/20 text-blue-300' :
-                    reservation.status === 'arrived' ? 'bg-green-500/20 text-green-300' : 
-                    reservation.status === 'not_arrived' ? 'bg-red-500/20 text-red-300' :
-                    'bg-gray-500/20 text-gray-300'
+                    reservation.status === 'waiting' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/20 text-orange-300') :
+                    reservation.status === 'confirmed' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/20 text-blue-300') :
+                    reservation.status === 'arrived' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-green-100 text-green-700' : 'bg-green-500/20 text-green-300') : 
+                    reservation.status === 'not_arrived' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-red-100 text-red-700' : 'bg-red-500/20 text-red-300') :
+                    (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700' : 'bg-gray-500/20 text-gray-300')
                   }`}>
                     {statusLabels[reservation.status] || reservation.status}
                   </div>
                   {reservation.tableIds && reservation.tableIds.length > 0 && (
-                    <div className="text-gray-300">{t('tablesLabel')} {reservation.tableIds.map(id => {
+                    <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('tablesLabel')} {reservation.tableIds.map(id => {
                       const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []);
                       const table = allTables.find(t => t.id === id);
                       return table?.name || table?.number?.toString() || id;
                     }).join(', ')}</div>
                   )}
                   {reservation.phone && (
-                    <div className="text-gray-300">{t('telLabel')} {reservation.phone}</div>
+                    <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('telLabel')} {reservation.phone}</div>
                   )}
                   {reservation.notes && (
-                    <div className="text-gray-300 italic mt-1">"{reservation.notes}"</div>
+                    <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-500 italic mt-1' : 'text-gray-300 italic mt-1'}>"{reservation.notes}"</div>
                   )}
                   
                   {/* Tooltip arrow */}
-                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900" />
+                  <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
+                    document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t-white' : 'border-t-gray-900'
+                  }`} />
                 </div>
                 </div>
               </div>

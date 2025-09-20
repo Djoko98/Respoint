@@ -10,6 +10,9 @@
         "tauri": "tauri",
         "tauri:dev": "tauri dev",
         "tauri:build": "tauri build",
+        "icon:zoom": "node scripts/zoom-icon.js",
+        "icon:gen": "npx --yes @tauri-apps/cli icon src-tauri/icons/icon.png",
+        "icon:zoomgen": "npm run icon:zoom && npm run icon:gen",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [

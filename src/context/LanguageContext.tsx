@@ -50,6 +50,14 @@ export interface Translations {
   uploadLogo: string;
   removeLogo: string;
   printLogoDescription: string;
+  logoFileDescription: string;
+  uploading: string;
+  noLogo: string;
+  noPrintLogo: string;
+  enterRestaurantName: string;
+  enterOwnerName: string;
+  enterPhoneNumber: string;
+  enterAddress: string;
   
   // Owner Info
   ownerName: string;
@@ -236,6 +244,15 @@ export interface Translations {
   downgradesEndOfCycle: string;
   pricesInEUR: string;
   contactForEnterprise: string;
+
+  // POS Printer
+  posPrinterTitle: string;
+  desktopOnlyNotice: string;
+  preferredPosPrinter: string;
+  preferredPosPrinterDescription: string;
+  choosePrinterPlaceholder: string;
+  saveAsPreferred: string;
+  windowsDefaultPrinter: string;
   
   // Confirmation Messages
   deleteConfirmation: string;
@@ -446,6 +463,14 @@ const englishTranslations: Translations = {
   uploadLogo: 'Upload Logo',
   removeLogo: 'Remove Logo',
   printLogoDescription: 'PNG, JPG (Max 5MB) - Used for receipts and print documents',
+  logoFileDescription: 'PNG, JPG (Max 5MB)',
+  uploading: 'Uploading...',
+  noLogo: 'No logo',
+  noPrintLogo: 'No print logo',
+  enterRestaurantName: 'Enter restaurant name',
+  enterOwnerName: "Enter owner's name",
+  enterPhoneNumber: 'Enter phone number',
+  enterAddress: 'Enter restaurant address',
   
   // Owner Info
   ownerName: "Owner's Name",
@@ -629,6 +654,15 @@ const englishTranslations: Translations = {
   downgradesEndOfCycle: 'Downgrades will be applied at the end of the current billing cycle',
   pricesInEUR: 'All prices are in EUR and exclude VAT where applicable',
   contactForEnterprise: 'Contact support@respoint.com for custom enterprise plans',
+
+  // POS Printer
+  posPrinterTitle: 'POS Printer',
+  desktopOnlyNotice: 'Available only in the desktop app.',
+  preferredPosPrinter: 'Preferred POS printer',
+  preferredPosPrinterDescription: 'Used for direct bill printing',
+  choosePrinterPlaceholder: '-- Select printer --',
+  saveAsPreferred: 'Save as preferred',
+  windowsDefaultPrinter: 'Windows default:',
   
   // Confirmation Messages
   deleteConfirmation: 'Are you sure you want to delete this item?',
@@ -839,6 +873,14 @@ const serbianTranslations: Translations = {
   uploadLogo: 'Otpremi logo',
   removeLogo: 'Ukloni logo',
   printLogoDescription: 'PNG, JPG (Maks 5MB) - Koristi se za račune i štampane dokumente',
+  logoFileDescription: 'PNG, JPG (Maks 5MB)',
+  uploading: 'Otpremanje...',
+  noLogo: 'Nema logotipa',
+  noPrintLogo: 'Nema logotipa za štampu',
+  enterRestaurantName: 'Unesite naziv restorana',
+  enterOwnerName: 'Unesite ime vlasnika',
+  enterPhoneNumber: 'Unesite broj telefona',
+  enterAddress: 'Unesite adresu restorana',
   
   // Owner Info
   ownerName: 'Ime vlasnika',
@@ -1032,6 +1074,15 @@ const serbianTranslations: Translations = {
   downgradesEndOfCycle: 'Smanjenja plana će biti primenjena na kraju trenutnog ciklusa naplate',
   pricesInEUR: 'Sve cene su u EUR i ne uključuju PDV gde je primenljivo',
   contactForEnterprise: 'Kontaktirajte support@respoint.com za prilagođene enterprise planove',
+
+  // POS Printer
+  posPrinterTitle: 'POS štampač',
+  desktopOnlyNotice: 'Dostupno samo u desktop aplikaciji.',
+  preferredPosPrinter: 'Preferirani POS štampač',
+  preferredPosPrinterDescription: 'Koristi se za direktnu štampu računa',
+  choosePrinterPlaceholder: '-- Izaberite štampač --',
+  saveAsPreferred: 'Sačuvaj kao preferirani',
+  windowsDefaultPrinter: 'Windows podrazumevani:',
   
   // Confirmation Messages
   deleteConfirmation: 'Da li ste sigurni da želite da obrišete ovu stavku?',

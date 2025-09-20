@@ -376,7 +376,7 @@ export class DirectPrintService {
 
   private static formatDate(dateString: string): string {
     const date = new Date(dateString);
-    return date.toLocaleDateString('sr-RS', {
+    return date.toLocaleDateString('en-GB', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric'

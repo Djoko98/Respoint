@@ -34,7 +34,7 @@ const ContactInfoSection: React.FC<ContactInfoSectionProps> = memo(({
             value={formData.phone}
             onChange={(e) => onInputChange('phone', e.target.value)}
             className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors"
-            placeholder="Enter phone number"
+            placeholder={t('enterPhoneNumber')}
           />
         </div>
 
@@ -45,7 +45,7 @@ const ContactInfoSection: React.FC<ContactInfoSectionProps> = memo(({
             onChange={(e) => onInputChange('address', e.target.value)}
             rows={3}
             className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors resize-none"
-            placeholder="Enter restaurant address"
+            placeholder={t('enterAddress')}
           />
         </div>
 

@@ -779,7 +779,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{t('dateAndTime')}</label>
                     <div className="px-3 py-2 bg-[#0A1929] border border-gray-800 rounded text-sm text-white">
-                      {new Date(editReservation.date).toLocaleDateString()} at {editReservation.time}
+                      {new Date(editReservation.date).toLocaleDateString('en-GB')} at {editReservation.time}
                     </div>
                   </div>
 

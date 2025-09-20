@@ -24,6 +24,136 @@ body {
   font-family: 'Inter', sans-serif;
 }
 
+/* Theme variables */
+:root {
+  --bg: #000814;
+  --surface: #0A1929;
+  --surface-2: #1E2A34;
+  --text: #ffffff;
+  --text-muted: #8891A7;
+  --border: #1F2937; /* gray-800 */
+  --border-strong: #2A3B4F;
+  --chip: #0F243A;
+  --overlay: rgba(0,0,0,0.7);
+  --primary: #3B82F6;
+  --accent: #FFB800;
+}
+
+[data-theme="light"] {
+  --bg: #f6f8fb; /* malo tamnije od bele za canvas/background */
+  --surface: #ffffff;
+  --surface-2: #f3f6fa; /* svetla ali mrvu tamnija */
+  --text: #0f172a; /* slate-900 */
+  --text-muted: #475569; /* slate-600 */
+  --border: #e5e7eb; /* gray-200 */
+  --border-strong: #cbd5e1; /* slate-300 */
+  --chip: #e2e8f0; /* slate-200 */
+  --overlay: rgba(255,255,255,0.6);
+}
+
+/* Global base using variables */
+html, body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+/* Light theme overrides for commonly used hardcoded utility classes */
+[data-theme="light"] .bg-\[\#000814\] { background-color: var(--surface) !important; }
+[data-theme="light"] .bg-\[\#010A16\] { background-color: var(--surface) !important; }
+[data-theme="light"] .bg-\[\#0A1929\] { background-color: var(--surface-2) !important; }
+[data-theme="light"] .bg-\[\#1E2A34\] { background-color: var(--surface-2) !important; }
+[data-theme="light"] .bg-\[\#1a1a1a\] { background-color: #ffffff !important; }
+[data-theme="light"] .bg-\[\#0F243A\] { background-color: var(--chip) !important; color: var(--text-muted) !important; }
+[data-theme="light"] .bg-black\/70 { background-color: var(--overlay) !important; }
+[data-theme="light"] .bg-\[\#000814\]\/70 { background-color: rgba(255,255,255,0.35) !important; }
+
+/* Light mode: loading screen pure white */
+[data-theme="light"] .loading-screen { background-color: #ffffff !important; }
+[data-theme="light"] .loading-gradient { display: none !important; }
+
+[data-theme="light"] .text-gray-300 { color: #334155 !important; }
+[data-theme="light"] .text-gray-400 { color: var(--text-muted) !important; }
+[data-theme="light"] .text-gray-500 { color: #64748b !important; }
+[data-theme="light"] .text-white { color: #0f172a !important; }
+[data-theme="light"] .titlebar-buttons .text-white { color: #0f172a !important; }
+[data-theme="light"] .titlebar-buttons .text-gray-400 { color: #475569 !important; }
+[data-theme="light"] .titlebar-buttons .bg-gray-800 { background-color: #e5e7eb !important; }
+[data-theme="light"] .titlebar-buttons .hover\:bg-gray-800:hover { background-color: #e2e8f0 !important; }
+
+[data-theme="light"] .text-\[\#8891A7\] { color: var(--text-muted) !important; }
+/* Scope text-white overrides to dark-surface containers only */
+[data-theme="light"] .bg-\[\#000814\] .text-white,
+[data-theme="light"] .bg-\[\#0A1929\] .text-white,
+[data-theme="light"] .bg-\[\#1E2A34\] .text-white { color: var(--text) !important; }
+[data-theme="light"] .bg-\[\#000814\] .canvas-text,
+[data-theme="light"] .bg-\[\#0A1929\] .canvas-text,
+[data-theme="light"] .bg-\[\#1E2A34\] .canvas-text { color: #ffffff !important; }
+[data-theme="light"] .bg-\[\#000814\] .text-white\/70,
+[data-theme="light"] .bg-\[\#0A1929\] .text-white\/70,
+[data-theme="light"] .bg-\[\#1E2A34\] .text-white\/70 { color: rgba(15, 23, 42, 0.7) !important; }
+[data-theme="light"] .text-white\/70 { color: rgba(15, 23, 42, 0.7) !important; }
+
+[data-theme="light"] .border-gray-800 { border-color: var(--border) !important; }
+[data-theme="light"] .border-\[\#1E2A34\] { border-color: var(--border) !important; }
+[data-theme="light"] .border-\[\#2A3B4F\] { border-color: var(--border-strong) !important; }
+[data-theme="light"] .border-gray-700 { border-color: var(--border) !important; }
+[data-theme="light"] .border-white\/40 { border-color: rgba(15, 23, 42, 0.4) !important; }
+[data-theme="light"] .hover\:border-white:hover { border-color: #0f172a !important; }
+[data-theme="light"] .hover\:text-white:hover { color: #0f172a !important; }
+[data-theme="light"] .hover\:bg-gray-700:hover { background-color: #f3f4f6 !important; }
+
+/* Light mode: emphasize login screen branding text */
+[data-theme="light"] .login-title { color: #ffffff !important; text-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+[data-theme="light"] .bg-\[\#000814\] .login-title { color: #ffffff !important; }
+[data-theme="light"] .login-subtitle { color: #ffffff !important; opacity: 0.9; }
+[data-theme="light"] .login-feature-text { color: #ffffff !important; }
+[data-theme="light"] .login-feature-dot { background-color: #ffffff !important; opacity: 0.9; }
+
+/* Inputs and buttons from @layer components */
+[data-theme="light"] .inputBase { background-color: var(--surface-2) !important; color: var(--text) !important; border-color: var(--border) !important; }
+[data-theme="light"] .btnGhost { background-color: var(--surface-2) !important; color: var(--text) !important; }
+[data-theme="light"] .btnAccent { color: #0f172a !important; }
+
+/* Cards / list items */
+[data-theme="light"] .bg-gray-800 { background-color: #f1f5f9 !important; }
+[data-theme="light"] .bg-gray-900 { background-color: #f8fafc !important; }
+[data-theme="light"] .hover\:bg-gray-800:hover { background-color: #f3f4f6 !important; }
+[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(0,0,0,0.06) !important; }
+[data-theme="light"] .hover\:bg-\[\#1E2A34\]:hover { background-color: #e5e7eb !important; }
+
+/* Scrollbars adapted for light */
+[data-theme="light"] .custom-scrollbar,
+[data-theme="light"] .account-settings-scrollbar {
+  scrollbar-color: #94a3b8 #e5e7eb;
+}
+[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-track,
+[data-theme="light"] .account-settings-scrollbar::-webkit-scrollbar-track { background: #e5e7eb; }
+[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb,
+[data-theme="light"] .account-settings-scrollbar::-webkit-scrollbar-thumb { background: #94a3b8; }
+
+/* Semi-transparent dark surfaces become translucent white in light theme */
+[data-theme="light"] .bg-\[\#0A1929\]\/30 { background-color: rgba(255,255,255,0.9) !important; }
+[data-theme="light"] .bg-\[\#0A1929\]\/50 { background-color: rgba(255,255,255,0.8) !important; }
+[data-theme="light"] .bg-\[\#000814\]\/50 { background-color: rgba(255,255,255,0.8) !important; }
+
+/* Light mode: soften Top Tables items */
+[data-theme="light"] .top-tables-item {
+  background-color: #eef2f7 !important; /* very light slate */
+  border: 1px solid var(--border) !important;
+}
+[data-theme="light"] .top-tables-item .text-white { color: var(--text) !important; }
+
+/* Force white text for waiter chips on tables in light mode */
+[data-theme="light"] .waiter-chip { background-color: rgba(229, 231, 235, 0.85) !important; color: #ffffff !important; }
+[data-theme="light"] .waiter-chip * { color: #ffffff !important; }
+
+/* Light mode: keep canvas text white for better contrast on dark canvas */
+[data-theme="light"] .canvas-text { color: #ffffff !important; }
+
+/* Canvas free-text shadow (tables' numbers are not affected) */
+.canvas-text { text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+[data-theme="light"] .canvas-text { text-shadow: 0 1px 2px rgba(0,0,0,0.45) !important; }
+
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -98,6 +228,18 @@ body {
 
 .statistics-scrollbar::-webkit-scrollbar-thumb:active {
   background: #3a3a3a;
+}
+
+/* Light mode: transparent track for Account Settings, Subscribe, and Statistics scroll areas */
+[data-theme="light"] .statistics-scrollbar {
+  scrollbar-color: #94a3b8 transparent;
+}
+[data-theme="light"] .statistics-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-theme="light"] .statistics-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-color: var(--border);
 }
 
 /* Light scrollbar with transparent background */
@@ -211,9 +353,9 @@ body {
 
 /* Custom styles for the canvas text editor textarea */
 .canvas-text-editor {
-  background-color: #111827; /* gray-900 */
+  background-color: #111827; /* dark default */
   color: white;
-  border: 1px solid #374151; /* gray-700 */
+  border: 1px solid #374151; /* dark border */
   border-radius: 6px;
   padding: 8px;
   font-size: 14px;
@@ -250,6 +392,16 @@ body {
 
 .canvas-text-editor::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Light mode overrides for canvas text editor */
+[data-theme="light"] .canvas-text-editor {
+  background-color: #ffffff !important;
+  color: #0f172a !important; /* input text dark */
+  border: 1px solid #e5e7eb !important; /* light border */
+}
+[data-theme="light"] .canvas-text-editor::placeholder {
+  color: #94a3b8 !important; /* slate-400 */
 }
 
 /* Fade in animation */

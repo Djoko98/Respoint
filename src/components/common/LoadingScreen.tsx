@@ -1,15 +1,13 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import logoImage from '../../assets/Logo.png';
-import logoLine from '../../assets/logo_line.svg';
-import logoDot from '../../assets/logo_dot.svg';
 
 interface LoadingScreenProps {
   isTestingNetwork?: boolean;
   networkError?: string | null;
   onRetry?: () => void;
   onReset?: () => void;
-  variant?: 'rings' | 'dots' | 'logo' | 'image' | 'split-logo';
+  variant?: 'rings' | 'dots' | 'logo' | 'image' | 'split-logo' | 'rail-bounce';
   animationSpeed?: 'gentle' | 'smooth' | 'quick';
 }
 
@@ -21,6 +19,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   variant = 'split-logo',
   animationSpeed = 'smooth'
 }) => {
+  // During connection testing, prefer the new logo rail animation unless explicitly overridden
+  const activeVariant: NonNullable<LoadingScreenProps['variant']> = isTestingNetwork
+    ? 'rail-bounce'
+    : (variant || 'split-logo');
   const getAnimationClass = () => {
     switch (animationSpeed) {
       case 'gentle':
@@ -34,7 +36,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   };
 
   const renderLoadingAnimation = () => {
-    switch (variant) {
+    switch (activeVariant) {
       case 'rings':
         return (
           <div className="relative w-24 h-24 mx-auto mb-8">
@@ -147,6 +149,52 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           </div>
         );
       
+      case 'rail-bounce':
+        // Custom animation: a vertical rounded rectangle "rail" on the left and the brand circle
+        // moving up and down alongside it across its full height
+        return (
+          <div className="relative mb-8">
+            <div className="w-40 h-40 mx-auto relative">
+              <svg viewBox="0 0 256 256" className="w-full h-full" fill="none">
+                <defs>
+                  <linearGradient id="accentGradient" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#D95B1A" />
+                    <stop offset="100%" stopColor="#F29809" />
+                  </linearGradient>
+                  <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="4" />
+                  </filter>
+                </defs>
+
+                {/* Left vertical rounded rectangle (rail) - same color as circle, wider */}
+                <rect x="56" y="20" width="56" height="216" rx="28" fill="url(#accentGradient)" />
+
+                {/* Moving circle (brand dot) aligned to the right of the rail */}
+                <motion.circle
+                  cx="172"
+                  cy="56"
+                  r="36"
+                  fill="url(#accentGradient)"
+                  animate={{ cy: [56, 200, 56] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                />
+
+                {/* Matching glow following the same motion */}
+                <motion.circle
+                  cx="172"
+                  cy="56"
+                  r="36"
+                  fill="url(#accentGradient)"
+                  filter="url(#softGlow)"
+                  opacity="0.5"
+                  animate={{ cy: [56, 200, 56] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              </svg>
+            </div>
+          </div>
+        );
+
       case 'split-logo':
         return (
           <div className="relative mb-8">
@@ -319,14 +367,14 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   return (
     <AnimatePresence>
       <motion.div 
-        className="fixed inset-0 bg-[#000814] flex items-center justify-center"
+        className="fixed inset-0 bg-[#000814] flex items-center justify-center loading-screen"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.5 }}
       >
         {/* Subtle gradient background */}
-        <div className="absolute inset-0">
+        <div className="absolute inset-0 loading-gradient">
           <div className="absolute inset-0 bg-gradient-to-br from-[#000814] via-[#0A1929] to-[#000814] opacity-50"></div>
         </div>
 

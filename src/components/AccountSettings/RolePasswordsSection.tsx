@@ -52,19 +52,19 @@ const RolePasswordsSection: React.FC<Props> = ({ onSetHashes, hasAdminPin, hasMa
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-300">{label('Admin PIN', 'Admin PIN')}</div>
-            <div className="text-xs {hasAdminPin ? 'text-green-400' : 'text-gray-500'}">
+            <div className={`text-xs role-pin-status ${hasAdminPin ? 'pin-set text-green-400' : 'text-gray-500'}`}>
               {hasAdminPin ? label('Set', 'Postavljen') : label('Not set', 'Nije postavljen')}
             </div>
           </div>
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-300">{label('Manager PIN', 'Menadžer PIN')}</div>
-            <div className="text-xs {hasManagerPin ? 'text-green-400' : 'text-gray-500'}">
+            <div className={`text-xs role-pin-status ${hasManagerPin ? 'pin-set text-green-400' : 'text-gray-500'}`}>
               {hasManagerPin ? label('Set', 'Postavljen') : label('Not set', 'Nije postavljen')}
             </div>
           </div>
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-300">{label('Waiter PIN', 'Konobar PIN')}</div>
-            <div className="text-xs {hasWaiterPin ? 'text-green-400' : 'text-gray-500'}">
+            <div className={`text-xs role-pin-status ${hasWaiterPin ? 'pin-set text-green-400' : 'text-gray-500'}`}>
               {hasWaiterPin ? label('Set', 'Postavljen') : label('Not set', 'Nije postavljen')}
             </div>
           </div>
