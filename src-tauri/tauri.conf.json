@@ -43,7 +43,7 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxRUQxN0E5M0E3ODBFOApSV1RvZ0tlVGV0RWVCc0cyeUY4NUw1cHFTSkQvQTJUc0I0MzBxQnZOQnVGbmtWRHhRcmZlT0dMZwo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1RkVCMDI0OTQ4OENBQUIKUldTcnlvaVVKTEQrUlNuVTl6MHVnZ0ZWWXMySUpMRlJkL0VmTjdycHdSYjAvZlpMNFcyLytsbXUK",
       "endpoints": [
         "https://github.com/Djoko98/Respoint/releases/latest/download/latest.json"
       ],
