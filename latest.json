@@ -1,10 +1,10 @@
 {
-  "version": "0.1.8",
+  "version": "0.1.9",
   "notes": "🗁 New update available",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.8/ResPoint_0.1.8_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUT3BZYnBMWlViWHN1Q0w5ZXROOFJDUFl4R3pZL04zc2FhenhYU3M1QnplV09xeVJkZ2lDUUhJRWRDSmNOQ1d4Tm96djJYUkQyL1dhV2o3eEJ4NWdhSkVvRTFCblhqL3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY0MTYyMTAzCWZpbGU6UmVzUG9pbnRfMC4xLjhfeDY0LXNldHVwLmV4ZQpTMWh6Q3lUSkF4aG43WFhvbVduYkZQUXNyUmRVS3NxNW5BU2RpUk9rai80TEtwMGwvcURMOU5yaUUxbUhjYWQ1UnhTakU0aktKdkNsY2ZLYzc2ZEpCUT09Cg=="
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.9/ResPoint_0.1.9_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUT3BZYnBMWlViWHRYWWNmU3FSUEJPcmJ4aVBwWitTVVpBK09ZVDl4UnNWa2JhYVRDV0tTcGRoeWdHWWEzb0kvanMwSW9Mam5rWWxjdEJ1bG5rSUg2LzNHSDMvU1pYMmdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY0MTkwMDQzCWZpbGU6UmVzUG9pbnRfMC4xLjlfeDY0LXNldHVwLmV4ZQpUblk2VUJVQVlQWHNHT2VxUjlZTnVjaUZnYTdUY25GeUthQTZMOW9jVU9SQmxIckhTSThldU1qNjJpTHJnaXZkK2pNSFZ5NEdrZ3pUV3EycG5QRFVDQT09Cg=="
     }
   }
 }
