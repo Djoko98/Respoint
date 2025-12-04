@@ -1,9 +1,9 @@
 {
-  "version": "0.1.21",
+  "version": "0.1.22",
   "notes": "Auto release",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.21/ResPoint_0.1.21_x64-setup.exe"
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.22/ResPoint_0.1.22_x64-setup.exe"
     }
   }
 }
