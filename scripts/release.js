@@ -90,16 +90,60 @@ function signWithMinisign(targetFile, signatureOutFile) {
 	logStep('Signature generated ✔');
 }
 
+/**
+ * Bump patch version (x.y.z -> x.y.(z+1)).
+ * Throws if the version is not a valid SemVer-like string.
+ */
+function bumpPatchVersion(current) {
+	if (typeof current !== 'string') {
+		throw new Error(`Invalid version in tauri.conf.json (expected string, got ${typeof current})`);
+	}
+	const parts = current.split('.');
+	if (parts.length !== 3 || parts.some((p) => Number.isNaN(Number(p)))) {
+		throw new Error(`Invalid version format in tauri.conf.json: "${current}" (expected x.y.z)`);
+	}
+	const [major, minor, patch] = parts.map((p) => Number(p));
+	const next = `${major}.${minor}.${patch + 1}`;
+	return next;
+}
+
 async function main() {
 	const distReleaseDir = path.join(projectRoot, 'dist-release');
 	ensureDir(distReleaseDir);
 
-	// Read version from tauri.conf.json
+	// Read + bump version in tauri.conf.json BEFORE the build
 	const tauriConfPath = path.join(projectRoot, 'src-tauri', 'tauri.conf.json');
-	const tauriConf = readJson(tauriConfPath);
-	const version = tauriConf?.version;
-	if (!version) {
+	let tauriConf;
+	try {
+		tauriConf = readJson(tauriConfPath);
+	} catch (err) {
+		throw new Error(`Failed to read src-tauri/tauri.conf.json: ${err.message || err}`);
+	}
+	const currentVersion = tauriConf?.version;
+	if (!currentVersion) {
 		throw new Error('Version not found in src-tauri/tauri.conf.json');
+	}
+
+	const newVersion = bumpPatchVersion(currentVersion);
+	tauriConf.version = newVersion;
+
+	try {
+		writeJson(tauriConfPath, tauriConf);
+	} catch (err) {
+		throw new Error(`Failed to write updated version to src-tauri/tauri.conf.json: ${err.message || err}`);
+	}
+
+	logStep(`✔ Version bumped to ${newVersion}`);
+
+	// Try to stage & commit the version bump so it is included before pushing
+	try {
+		execSync(`git add "${tauriConfPath.replace(/\\/g, '/')}"`, { stdio: 'inherit', shell: true });
+		execSync(`git commit -m "chore: bump Tauri version to v${newVersion}"`, { stdio: 'inherit', shell: true });
+		logStep('Git commit created for Tauri version bump ✔');
+	} catch (gitErr) {
+		// Do not hard-fail the release if git is not available or commit fails;
+		// just warn so the user can commit manually.
+		console.warn('Warning: failed to create git commit for Tauri version bump:', gitErr.message || gitErr);
 	}
 
 	// 1) Build
@@ -128,7 +172,7 @@ async function main() {
 
 	// 4) Generate latest.json
 	const latest = {
-		version: version,
+		version: newVersion,
 		notes: "Auto-generated release",
 		pub_date: new Date().toISOString(),
 		platforms: {
