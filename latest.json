@@ -1,9 +1,9 @@
 {
-  "version": "0.1.26",
-  "notes": "New Update Available",
-  "pub_date": "2025-12-04T23:09:56.062Z",
+  "version": "0.1.27",
+  "notes": "Automatic Release",
+  "pub_date": "2025-12-04T23:23:47.867Z",
   "windows-x86_64": {
-    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkNClJVU1V0NlkvMWFlZ3hzUVlGZklQWFlhb0hEbFFIMWw3Umd3aEVZZEhTNFRzeWdpSUJINk5mcWQ2WG90YzIrdFd3YXdzQW5xUDcvcEdWSWR3cnFoRmVPMVJVQ0F3b3JycVRncz0NCnRydXN0ZWQgY29tbWVudDogdGltZXN0YW1wOjE3NjQ4ODk3OTUJZmlsZTpSZXNQb2ludF8wLjEuMjZfeDY0LXNldHVwLmV4ZQloYXNoZWQNCnpsMHpPMk5RaW9SNXZDMHk5NUlaem1TTE1ZRzR5YkRwU1NYYzgyWnZkWXdFNFpOYVlEQ1dKUXB4U0VBT2NDaGltRWE4aklDUzRHYTlUVDA1Q1dzckJRPT0NCg==",
-    "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.26/ResPoint_0.1.26_x64-setup.exe"
+    "signature": "RUSUt6Y/1aegxvaTdDJ5O8ZqnHTxVEsbt0aJSkNJ/rIWms/GqWI7+sT3RsI9KQczcZG5N60fkmaLPUGpDE9cGBPkJCSnzIxWsgA=",
+    "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.27/ResPoint_0.1.27_x64-setup.exe"
   }
 }
