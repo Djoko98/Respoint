@@ -1,10 +1,10 @@
 {
-  "version": "0.1.12",
+  "version": "0.1.13",
   "notes": "New update available",
   "platforms": {
     "windows-x86_64": {
-      "signature": "RUSwUUNku+KT/pZmEKnfPhh8a2SagT9iXNUl/EI/l4HiTK8SZTVnnVQqxx01aNcZ74JZOI/OlXYJs3QbrapaWO8VitbxRZvqsQM=",
-      "url": "https://github.com/Djoko98/Respoint/releases/latest/download/ResPoint_0.1.12_x64-setup.exe"
+      "signature": "RUSwUUNku+KT/mNEhigmzJwerLbELFqcsAxHbJ29V0FkrDq6vE8TPIyhpVN6ptC5GhmQQqOSLKD2sWLvqWoTqeCkyY+hVDjVKgc=",
+      "url": "https://github.com/Djoko98/Respoint/releases/latest/download/ResPoint_0.1.13_x64-setup.exe"
     }
   }
 }
