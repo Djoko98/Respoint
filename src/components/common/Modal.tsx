@@ -6,8 +6,9 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
   hideCloseButton?: boolean;
+  contentScrollable?: boolean;
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -16,7 +17,8 @@ const Modal: React.FC<ModalProps> = ({
   title,
   children,
   size = 'md',
-  hideCloseButton = false
+  hideCloseButton = false,
+  contentScrollable = true
 }) => {
   // Handle keyboard events
   useEffect(() => {
@@ -45,12 +47,14 @@ const Modal: React.FC<ModalProps> = ({
     sm: 'max-w-sm',
     md: 'max-w-md',
     lg: 'max-w-3xl',
-    xl: 'max-w-5xl'
+    xl: 'max-w-4xl',
+    '2xl': 'max-w-6xl',
+    '3xl': 'max-w-7xl'
   };
 
   const modalContent = (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-      <div className={`bg-[#000814] rounded-lg shadow-2xl w-full ${sizeClasses[size]} overflow-hidden`}>
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm z-[12000] flex items-center justify-center p-4">
+      <div className={`bg-[#000814] rounded-lg shadow-2xl w-full ${sizeClasses[size]} max-h-[92vh] overflow-hidden flex flex-col`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <h2 className="text-xl font-light text-white tracking-wide">{title}</h2>
@@ -68,14 +72,16 @@ const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="modal-content">
+        <div className={`modal-content flex-1 ${contentScrollable ? 'overflow-y-auto statistics-scrollbar' : 'overflow-hidden'}`}>
           {children}
         </div>
       </div>
     </div>
   );
 
-  return createPortal(modalContent, document.body);
+  // Portal inside zoomed app root so auto-zoom affects modals; fallback to body
+  const portalTarget = document.getElementById('app-zoom-root') || document.body;
+  return createPortal(modalContent, portalTarget);
 };
 
 export default Modal; 

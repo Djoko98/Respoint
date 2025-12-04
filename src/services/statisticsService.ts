@@ -64,8 +64,9 @@ export const statisticsService = {
       const stats = {
         total_reservations: reservations?.length || 0,
         total_guests: reservations?.reduce((sum, r) => sum + r.number_of_guests, 0) || 0,
-        arrived_reservations: reservations?.filter(r => r.status === 'arrived').length || 0, // renamed and counts reservations not guests
-        cancelled_reservations: reservations?.filter(r => r.status === 'cancelled').length || 0,
+        // Treat cleared (finished stay) as ARRIVED, not cancelled
+        arrived_reservations: reservations?.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length || 0, // counts reservations, not guests
+        cancelled_reservations: reservations?.filter(r => r.status === 'cancelled' && !(r as any).cleared).length || 0,
         not_arrived_reservations: reservations?.filter(r => r.status === 'not_arrived').length || 0, // only explicit not_arrived
         waiting_reservations: reservations?.filter(r => r.status === 'waiting' || r.status === 'confirmed').length || 0, // waiting + confirmed
         // Revenue možete izračunati na osnovu vaše logike
@@ -154,8 +155,9 @@ export const statisticsService = {
       const result = {
         totalReservations: reservations?.length || 0,
         totalGuests: reservations?.reduce((sum: number, r: any) => sum + r.number_of_guests, 0) || 0,
-        arrivedReservations: reservations?.filter((r: any) => r.status === 'arrived').length || 0,
-        cancelledReservations: reservations?.filter((r: any) => r.status === 'cancelled').length || 0,
+        // Treat cleared finished stays as arrived
+        arrivedReservations: reservations?.filter((r: any) => r.status === 'arrived' || (r.status === 'cancelled' && r.cleared === true)).length || 0,
+        cancelledReservations: reservations?.filter((r: any) => r.status === 'cancelled' && !r.cleared).length || 0,
         notArrivedReservations: reservations?.filter((r: any) => r.status === 'not_arrived').length || 0, // only explicit not_arrived
         waitingReservations: reservations?.filter((r: any) => r.status === 'waiting' || r.status === 'confirmed').length || 0, // waiting + confirmed
         totalRevenue: 0,

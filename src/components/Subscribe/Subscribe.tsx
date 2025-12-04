@@ -3,6 +3,7 @@ import { UserContext } from '../../context/UserContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { subscriptionService, SubscriptionPlan, UserSubscription } from '../../services/subscriptionService';
 import DeleteConfirmationModal from '../common/DeleteConfirmationModal';
+import { ThemeContext } from '../../context/ThemeContext';
 
 interface SubscribeProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ type BillingCycle = 'monthly' | 'yearly';
 const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
   const { user } = useContext(UserContext);
   const { t } = useLanguage();
+  const { theme } = useContext(ThemeContext);
   
   const [loading, setLoading] = useState(false);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -62,7 +64,7 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
     
     setLoading(true);
     try {
-      // Load available plans
+      // Load available plans (features text is composed via i18n at render time)
       const availablePlans = await subscriptionService.getPlans();
       setPlans(availablePlans);
       
@@ -151,9 +153,41 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
   
   const currentPlan = plans.find(p => p.id === currentSubscription?.plan_id);
 
+  // Localized feature lists per plan
+  const getPlanFeatures = (planName: string): string[] => {
+    if (planName === 'Free') {
+      return [
+        t('planFeatureFreeReservations'),
+        t('planFeatureFreeZones'),
+        t('planFeatureFreeLayouts'),
+        t('planFeatureFreeCoreTools'),
+      ];
+    }
+    if (planName === 'Pro') {
+      return [
+        t('planFeatureProReservations'),
+        t('planFeatureProZones'),
+        t('planFeatureProLayouts'),
+        t('planFeatureProStatistics'),
+        t('planFeatureProTimeline'),
+        t('planFeatureProCoreTools'),
+        t('planFeatureProEmailSupport'),
+      ];
+    }
+    // Enterprise
+    return [
+      t('planFeatureEntEverythingInPro'),
+      t('planFeatureEntUnlimitedReservations'),
+      t('planFeatureEntUnlimitedZones'),
+      t('planFeatureEntGuestbook'),
+      t('planFeatureEntWaiterTab'),
+      t('planFeatureEntPrioritySupport'),
+    ];
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center p-4">
-      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
+      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <h2 className="text-xl font-light text-white tracking-wide">{t('subscription')}</h2>
@@ -184,16 +218,26 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                       <div>
                         <div className="flex items-center gap-3 mb-4">
                           <h4 className="text-2xl font-light text-white">{currentPlan.name}</h4>
-                          <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded">{t('active')}</span>
+                          <span
+                            className={`px-2 py-1 text-xs rounded ${
+                              theme === 'light'
+                                ? 'bg-green-100 text-green-600'
+                                : 'bg-green-500/20 text-green-400'
+                            }`}
+                          >
+                            {t('active')}
+                          </span>
                         </div>
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center gap-2">
                               <span className="text-gray-500">{t('started')}:</span>
                             <span className="text-gray-300">
-                              {new Date(currentSubscription.starts_at).toLocaleDateString('en-GB')}
+                              {currentSubscription?.starts_at
+                                ? new Date(currentSubscription.starts_at).toLocaleDateString('en-GB')
+                                : '—'}
                             </span>
                           </div>
-                          {currentSubscription.ends_at && (
+                          {currentSubscription?.ends_at && (
                             <div className="flex items-center gap-2">
                                 <span className="text-gray-500">{t('ends')}:</span>
                               <span className="text-gray-300">
@@ -226,7 +270,7 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                               const nextPlan = plans.find(p => p.price > currentPlan.price);
                               if (nextPlan) handlePlanSelect(nextPlan.id);
                             }}
-                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+                            className="px-4 py-2 text-sm rounded font-medium transition-colors text-blue-600 hover:bg-blue-600/10"
                           >
                             {t('upgrade')}
                           </button>
@@ -234,7 +278,7 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                         {currentPlan.price > 0 && (
                           <button
                             onClick={handleCancel}
-                            className="px-4 py-2 text-red-400 text-sm rounded hover:bg-red-500/10 transition-colors"
+                            className="px-4 py-2 text-sm rounded transition-colors text-red-400 hover:bg-red-500/10"
                           >
                             {t('cancelSubscription')}
                           </button>
@@ -266,12 +310,12 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                       }`}
                     >
                         {t('yearly')}
-                        <span className="ml-1 text-green-400">{t('savePercent')}</span>
+                        <span className="ml-1 text-green-500">{t('savePercent')}</span>
                     </button>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                   {plans.map((plan) => {
                     const isCurrentPlan = currentSubscription?.plan_id === plan.id;
                     const monthlyPrice = plan.price;
@@ -281,13 +325,13 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                     return (
                       <div 
                         key={plan.id}
-                        className={`bg-[#0A1929] border rounded p-6 relative ${
+                        className={`bg-[#0A1929] border rounded p-6 relative flex flex-col h-full ${
                           isCurrentPlan ? 'border-blue-500' : 'border-gray-800'
                         }`}
                       >
                         {plan.name === 'Pro' && (
                           <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                            <span className="px-3 py-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs rounded-full">
+                            <span className="px-3 py-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white-100 text-xs rounded-full popular-badge">
                               {t('mostPopular')}
                             </span>
                           </div>
@@ -307,7 +351,7 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                         </div>
                         
                         <ul className="space-y-2 mb-6">
-                          {(plan.features as string[] || []).map((feature, index) => (
+                          {getPlanFeatures(plan.name).map((feature, index) => (
                             <li key={index} className="flex items-start gap-2 text-sm text-gray-300">
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-green-400 mt-0.5 flex-shrink-0">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -320,12 +364,14 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
                         <button
                           onClick={() => handlePlanSelect(plan.id)}
                           disabled={isCurrentPlan || loading}
-                          className={`w-full py-2 rounded text-sm font-medium transition-colors ${
+                          className={`w-full py-2 rounded text-sm font-medium transition-colors mt-auto ${
                             isCurrentPlan
-                              ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                              ? theme === 'light'
+                                ? 'bg-gray-200 text-gray-600 cursor-not-allowed'
+                                : 'bg-gray-800 text-gray-500 cursor-not-allowed'
                               : plan.name === 'Pro'
-                              ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
-                              : 'bg-blue-600 text-white hover:bg-blue-700'
+                              ? 'plan-select-btn bg-gradient-to-r from-purple-600 to-blue-600 text-white-100 hover:from-purple-700 hover:to-blue-700'
+                              : 'plan-select-btn bg-blue-600 text-white-100 hover:bg-blue-700'
                           }`}
                         >
                           {isCurrentPlan ? t('currentPlanButton') : t('selectPlan')}

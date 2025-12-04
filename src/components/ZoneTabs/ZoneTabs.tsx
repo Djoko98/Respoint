@@ -1,16 +1,17 @@
 import React, { useContext, useMemo, useState, useCallback } from "react";
 import { ZoneContext } from "../../context/ZoneContext";
-import { UserContext } from "../../context/UserContext";
 import { LayoutContext } from "../../context/LayoutContext";
 import { useLanguage } from "../../context/LanguageContext";
+import { useRolePermissions } from "../../hooks/useRolePermissions";
 import ZoneModal from "./ZoneModal";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 
 const ZoneTabs: React.FC = () => {
   const { zones, currentZone, setCurrentZone, showZoneModal, setShowZoneModal } = useContext(ZoneContext);
   const { isEditing } = useContext(LayoutContext);
-  const { isAuthenticated, activeRole } = useContext(UserContext);
+  const { hasPermission } = useRolePermissions();
   const { t } = useLanguage();
+  const canManageZones = hasPermission('manage_zones');
   
   // Alert modal state
   const [showAlertModal, setShowAlertModal] = useState(false);
@@ -44,8 +45,7 @@ const ZoneTabs: React.FC = () => {
       showAlert(t('saveRequired'), t('saveBeforeManagingZones'), "warning");
       return;
     }
-    // Waiter cannot manage zones
-    if (activeRole === 'waiter') {
+    if (!canManageZones) {
       showAlert(t('actionNotAllowed'), t('insufficientPermissions'), 'error');
       return;
     }
@@ -73,8 +73,10 @@ const ZoneTabs: React.FC = () => {
         {/* Plus button */}
         <button
           onClick={handleShowZoneModal}
-          disabled={isEditing || activeRole === 'waiter'}
-          className={`ml-4 w-5 h-5 rounded-full border border-[#FFB800] text-[#FFB800] flex items-center justify-center hover:bg-[#FFB800] hover:text-[#0A1929] transition-all duration-200 ${isEditing ? 'cursor-not-allowed opacity-50' : ''}`}
+          disabled={isEditing || !canManageZones}
+          className={`ml-4 w-5 h-5 rounded-full border border-[#FFB800] text-[#FFB800] flex items-center justify-center hover:bg-[#FFB800] hover:text-[#0A1929] transition-all duration-200 ${
+            isEditing || !canManageZones ? 'cursor-not-allowed opacity-50' : ''
+          }`}
           title={t('manageZones')}
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

@@ -17,6 +17,7 @@ import {
   subDays, subMonths, isWithinInterval, parseISO, isSameDay
 } from 'date-fns';
 import DeleteConfirmationModal from '../common/DeleteConfirmationModal';
+import { ThemeContext } from '../../context/ThemeContext';
 
 interface StatisticsProps {
   isOpen: boolean;
@@ -30,6 +31,8 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
   const { zones } = useContext(ZoneContext);
   const { zoneLayouts } = useContext(LayoutContext);
   const { t, getMonthNames, translations } = useLanguage();
+  const { theme } = useContext(ThemeContext);
+  const isLight = theme === 'light';
   
   // Helper function to format month name with translation
   const formatMonthYear = (dateString: string): string => {
@@ -169,9 +172,14 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
             }
             acc[month].reservations += 1;
             acc[month].guests += reservation.numberOfGuests || 0;
-            if (reservation.status === 'arrived') acc[month].arrived += 1;
-            if (reservation.status === 'not_arrived') acc[month].notArrived += 1;
-            if (reservation.status === 'cancelled') acc[month].cancelled += 1;
+            // Treat cleared finished stays as arrived
+            if (reservation.status === 'arrived' || (reservation.status === 'cancelled' && reservation.cleared === true)) {
+              acc[month].arrived += 1;
+            } else if (reservation.status === 'not_arrived') {
+              acc[month].notArrived += 1;
+            } else if (reservation.status === 'cancelled') {
+              acc[month].cancelled += 1;
+            }
             return acc;
           }, {});
           
@@ -401,7 +409,10 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
           if (hourlyData[hour]) {
             hourlyData[hour].reservations += 1;
             hourlyData[hour].guests += reservation.numberOfGuests || 0;
-            if (reservation.status === 'cancelled') {
+            // Treat cleared finished stays as arrived, not cancelled
+            if (reservation.status === 'cancelled' && reservation.cleared === true) {
+              hourlyData[hour].arrived += 1;
+            } else if (reservation.status === 'cancelled') {
               hourlyData[hour].cancelled += 1;
             } else if (reservation.status === 'not_arrived') {
               hourlyData[hour].notArrived += 1;
@@ -466,9 +477,9 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
           date: format(day, 'dd'),
           reservations: dayReservations.length,
           guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
-          arrived: dayReservations.filter(r => r.status === 'arrived').length,
+          arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
           notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
-          cancelled: dayReservations.filter(r => r.status === 'cancelled').length
+          cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
         });
       }
       
@@ -493,9 +504,9 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
           date: format(day, 'EEE'),
           reservations: dayReservations.length,
           guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
-          arrived: dayReservations.filter(r => r.status === 'arrived').length,
+        arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
           notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
-          cancelled: dayReservations.filter(r => r.status === 'cancelled').length
+        cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
         });
       }
       
@@ -517,9 +528,9 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
         date: format(day, 'dd'),
         reservations: dayReservations.length,
         guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
-        arrived: dayReservations.filter(r => r.status === 'arrived').length,
+      arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
         notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
-        cancelled: dayReservations.filter(r => r.status === 'cancelled').length
+      cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
       });
     }
     
@@ -547,11 +558,11 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
   };
   
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center p-4">
-      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
+      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
-          <h2 className="text-xl font-light text-white tracking-wide">{t('analytics')}</h2>
+          <h2 className="text-xl font-light text-white tracking-wide">{t('statistics')}</h2>
           <button
             onClick={onClose}
             className="text-gray-500 hover:text-white transition-colors p-1"
@@ -585,7 +596,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
             <div className="flex gap-2">
               <button
                 onClick={() => setShowDeleteConfirmation(true)}
-                className="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1.5 px-3 py-1.5"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded text-red-400 hover:bg-red-500/10 transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -594,7 +605,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
               </button>
               <button
                 onClick={exportToCSV}
-                className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 px-3 py-1.5"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded text-blue-400 hover:bg-blue-500/10 transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-8m0 0l-3 3m3-3l3 3M3 12a9 9 0 1118 0 9 9 0 01-18 0z" />
@@ -603,7 +614,11 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
               </button>
               <button
                 onClick={updateTodayStatistics}
-                className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 px-3 py-1.5"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors ${
+                  theme === 'light'
+                    ? 'text-gray-800 hover:bg-gray-100'
+                    : 'text-gray-300 hover:bg-gray-800 transition-colors'
+                }`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -623,6 +638,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                 onChange={setSelectedDate}
                 type="date"
                 label={t('date')}
+                size="sm"
               />
             )}
             
@@ -633,6 +649,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                   onChange={setSelectedWeek}
                   type="date"
                   label={t('weekOf')}
+                  size="sm"
                 />
                 <span className="text-xs text-gray-400">
                   ({format(startOfWeek(new Date(selectedWeek), { weekStartsOn: 1 }), 'MMM dd')} - {format(endOfWeek(new Date(selectedWeek), { weekStartsOn: 1 }), 'MMM dd')})
@@ -646,6 +663,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                 onChange={setSelectedMonth}
                 type="month"
                 label={t('month')}
+                size="sm"
               />
             )}
           </div>
@@ -736,9 +754,11 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                     {filter === 'today' ? t('hourlyBreakdown') : filter === 'week' ? t('weeklyBreakdown') : t('dailyBreakdown')}
                   </h3>
                   {getDailyChartData().length > 0 ? (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={getDailyChartData()} margin={{ top: 10, right: 15, bottom: 20, left: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
+                    <div className="w-full">
+                      <div className="w-full flex justify-center">
+                        <ResponsiveContainer width="95%" height={180}>
+                        <LineChart data={getDailyChartData()} margin={{ top: 10, right: 10, bottom: 0, left: -30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isLight ? '#E5E7EB' : '#2A3B4F'} />
                         <XAxis 
                           dataKey="date" 
                           stroke="#4B5563" 
@@ -747,7 +767,12 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                           angle={0}
                           textAnchor="middle"
                         />
-                        <YAxis stroke="#4B5563" fontSize={11} />
+                        <YAxis
+                          stroke="#4B5563"
+                          fontSize={11}
+                          allowDecimals={false}
+                          domain={[0, 'dataMax + 1']}
+                        />
                         <Tooltip 
                           contentStyle={{ 
                             backgroundColor: '#0A1929', 
@@ -762,10 +787,6 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                             }
                             return filter === 'today' ? `${t('time')}: ${value}` : `${t('day')}: ${value}`;
                           }}
-                        />
-                        <Legend 
-                          wrapperStyle={{ fontSize: '11px' }}
-                          iconType="line"
                         />
 
                         <Line 
@@ -793,8 +814,25 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                           name={t('cancelledLabel')}
                         />
 
-                      </LineChart>
-                    </ResponsiveContainer>
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      {/* External, centered legend (decoupled from chart size/margins) */}
+                      <div className="mt-2 w-full flex items-center justify-center gap-6 text-xs select-none">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#22C55E' }} />
+                        <span className={isLight ? 'text-green-700' : 'text-green-400'}>{t('arrivedLabel')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#EF4444' }} />
+                        <span className={isLight ? 'text-red-700' : 'text-red-400'}>{t('notArrivedLabel')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#6B7280' }} />
+                        <span className={isLight ? 'text-gray-700' : 'text-gray-400'}>{t('cancelledLabel')}</span>
+                      </div>
+                    </div>
+                    </div>
                   ) : (
                     <div className="h-[180px] flex items-center justify-center">
                       <span className="text-xs text-gray-600">
@@ -807,7 +845,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                 {/* Overview (Daily/Weekly/Monthly based on filter) */}
                 <div className="bg-[#0A1929] border border-gray-800 rounded p-4 lg:col-span-2 xl:col-span-2">
                   <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">{filter === 'today' ? t('dailyOverview') : filter === 'week' ? t('weeklyOverview') : t('monthlyOverview')}</h3>
-                  <div className="h-[180px] overflow-y-auto space-y-4 pr-2 light-transparent-scrollbar">
+                  <div className="h-[180px] overflow-y-auto space-y-4 pr-2 statistics-scrollbar">
                     {getOverviewItems().length > 0 ? (
                       getOverviewItems().slice(0, filter === 'month' ? 12 : undefined).map((item, index) => {
                       // Only count finalized reservations for progress bar
@@ -882,7 +920,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                 {/* Top Tables */}
                 <div className="bg-[#0A1929] border border-gray-800 rounded p-4 lg:col-span-1 xl:col-span-1">
                   <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">{t('topTablesTitle')}</h3>
-                  <div className="h-[180px] overflow-y-auto space-y-3 pr-2 light-transparent-scrollbar">
+                  <div className="h-[180px] overflow-y-auto space-y-3 pr-2 statistics-scrollbar">
                     {topTables.length > 0 ? (
                       topTables.map((table, index) => {
                         const tableName = formatTableNames([table.table_id], zoneLayouts);
@@ -926,11 +964,11 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                     <p className="text-xs text-gray-500 mb-4">
                       {t('allReservationsDescription')}
                     </p>
-                    <div className="h-[320px] overflow-y-auto light-transparent-scrollbar">
+                    <div className="h-[320px] overflow-y-auto statistics-scrollbar">
                       <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="border-b border-gray-800">
+                          <tr className={`border-b ${isLight ? 'border-gray-200' : 'border-gray-800'}`}>
                             <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('date')}</th>
                             <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('time')}</th>
                             <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('guestName')}</th>
@@ -950,7 +988,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                               return b.time.localeCompare(a.time);
                             })
                             .map((reservation) => (
-                              <tr key={reservation.id} className={`border-b border-gray-900 hover:bg-gray-900/50 ${reservation.isDeleted ? 'opacity-60' : ''}`}>
+                              <tr key={reservation.id} className={`border-b ${isLight ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-800 hover:bg-gray-900/30'} ${reservation.isDeleted ? 'opacity-60' : ''}`}>
                                 <td className="py-2 px-3 text-gray-300">
                                   {format(new Date(reservation.date), 'dd/MM/yyyy')}
                                 </td>
@@ -970,19 +1008,38 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                                   {reservation.phone || '-'}
                                 </td>
                                 <td className="py-2 px-3">
-                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                    reservation.status === 'arrived' 
-                                      ? 'bg-green-900/50 text-green-400 border border-green-800' 
-                                      : reservation.status === 'not_arrived'
-                                      ? 'bg-red-900/50 text-red-400 border border-red-800'
-                                      : reservation.status === 'cancelled'
-                                      ? 'bg-gray-900/50 text-gray-400 border border-gray-800'
-                                      : reservation.status === 'confirmed'
-                                      ? 'bg-blue-900/50 text-blue-400 border border-blue-800'
-                                      : 'bg-yellow-900/50 text-yellow-400 border border-yellow-800'
-                                  }`}>
-                                    {getStatusTranslation(reservation.status)}
-                                  </span>
+                                  {(() => {
+                                    const displayStatus = (reservation.status === 'cancelled' && reservation.cleared === true)
+                                      ? 'arrived'
+                                      : reservation.status;
+                                    const chipClass = (() => {
+                                      if (isLight) {
+                                        return displayStatus === 'arrived'
+                                          ? 'bg-green-100 text-green-700 border border-green-300'
+                                          : displayStatus === 'not_arrived'
+                                          ? 'bg-red-100 text-red-700 border border-red-300'
+                                          : displayStatus === 'cancelled'
+                                          ? 'bg-gray-200 text-gray-700 border border-gray-300'
+                                          : displayStatus === 'confirmed'
+                                          ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                                          : 'bg-yellow-100 text-yellow-700 border border-yellow-300';
+                                      }
+                                      return displayStatus === 'arrived'
+                                        ? 'bg-green-900/50 text-green-400 border border-green-800'
+                                        : displayStatus === 'not_arrived'
+                                        ? 'bg-red-900/50 text-red-400 border border-red-800'
+                                        : displayStatus === 'cancelled'
+                                        ? 'bg-gray-900/50 text-gray-400 border border-gray-800'
+                                        : displayStatus === 'confirmed'
+                                        ? 'bg-blue-900/50 text-blue-400 border border-blue-800'
+                                        : 'bg-yellow-900/50 text-yellow-400 border border-yellow-800';
+                                    })();
+                                    return (
+                                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${chipClass}`}>
+                                        {getStatusTranslation(displayStatus)}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="py-2 px-3 text-gray-300">
                                   {formatZoneName(reservation.zoneId, reservation.zoneName, zones)}

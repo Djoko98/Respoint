@@ -24,7 +24,6 @@ export interface Translations {
   notes: string;
   selectTable: string;
   save: string;
-  cancel: string;
   
   // Reservation Status
   confirmed: string;
@@ -46,6 +45,8 @@ export interface Translations {
   // Restaurant Info
   restaurantName: string;
   restaurantLogo: string;
+  restaurantLogoDark: string;
+  restaurantLogoLight: string;
   printLogo: string;
   uploadLogo: string;
   removeLogo: string;
@@ -239,11 +240,28 @@ export interface Translations {
   loadingSubscriptionData: string;
   zones: string;
   usedThisMonth: string;
-  created: string;
   planChangesImmediate: string;
   downgradesEndOfCycle: string;
   pricesInEUR: string;
   contactForEnterprise: string;
+  // Subscription plan features (copy)
+  planFeatureFreeReservations: string;
+  planFeatureFreeZones: string;
+  planFeatureFreeLayouts: string;
+  planFeatureFreeCoreTools: string;
+  planFeatureProReservations: string;
+  planFeatureProZones: string;
+  planFeatureProLayouts: string;
+  planFeatureProStatistics: string;
+  planFeatureProTimeline: string;
+  planFeatureProCoreTools: string;
+  planFeatureProEmailSupport: string;
+  planFeatureEntEverythingInPro: string;
+  planFeatureEntUnlimitedReservations: string;
+  planFeatureEntUnlimitedZones: string;
+  planFeatureEntGuestbook: string;
+  planFeatureEntWaiterTab: string;
+  planFeatureEntPrioritySupport: string;
 
   // POS Printer
   posPrinterTitle: string;
@@ -253,6 +271,13 @@ export interface Translations {
   choosePrinterPlaceholder: string;
   saveAsPreferred: string;
   windowsDefaultPrinter: string;
+
+  // POS Footer customization
+  receiptFooterTitle: string;
+  footerLine1Label: string;
+  footerLine2Label: string;
+  saveFooter: string;
+  editFooter: string;
   
   // Confirmation Messages
   deleteConfirmation: string;
@@ -339,12 +364,18 @@ export interface Translations {
   name: string;
   table: string;
   booked: string;
+  seated: string;
+  cleared: string;
   arrivedQuestion: string;
   markAsArrived: string;
   markAsNotArrived: string;
+  clearedQuestion: string;
+  markAsCleared: string;
+  markAsNotCleared: string;
   noOpenReservations: string;
   noClosedReservations: string;
   addOneOnPlusButton: string;
+  noSeatedReservations: string;
   
   // Reservation Form & Modal specific
   addNewReservation: string;
@@ -370,6 +401,7 @@ export interface Translations {
   tableNumber: string;
   removeTable: string;
   serviceType: string;
+  popularServiceTypes: string;
   mobileNumber: string;
   additionalRequirements: string;
   print: string;
@@ -412,6 +444,10 @@ export interface Translations {
   nameRequired: string;
   restaurantNameRequired: string;
   guestNameRequired: string;
+
+  // Color / Table color
+  tableColor: string;
+  chooseTableColor: string;
 }
 
 const englishTranslations: Translations = {
@@ -437,7 +473,6 @@ const englishTranslations: Translations = {
   notes: 'Notes',
   selectTable: 'Select Table',
   save: 'Save',
-  cancel: 'Cancel',
   
   // Reservation Status
   confirmed: 'Confirmed',
@@ -459,6 +494,8 @@ const englishTranslations: Translations = {
   // Restaurant Info
   restaurantName: 'Restaurant Name',
   restaurantLogo: 'Restaurant Logo',
+  restaurantLogoDark: 'Restaurant Logo - Dark Theme',
+  restaurantLogoLight: 'Restaurant Logo - Light Theme',
   printLogo: 'Print Logo',
   uploadLogo: 'Upload Logo',
   removeLogo: 'Remove Logo',
@@ -533,6 +570,10 @@ const englishTranslations: Translations = {
   total: 'Total',
   time: 'Time',
   day: 'Day',
+  guests: 'Guests',
+  arrived: 'Arrived',
+  reservations: 'Reservations',
+  noDataAvailable: 'No data available',
   arrivedLabel: 'Arrived',
   notArrivedLabel: 'Not Arrived',
   cancelledLabel: 'Cancelled',
@@ -649,11 +690,28 @@ const englishTranslations: Translations = {
   loadingSubscriptionData: 'Loading subscription data...',
   zones: 'Zones',
   usedThisMonth: 'used this month',
-  created: 'created',
   planChangesImmediate: 'Plan changes take effect immediately',
   downgradesEndOfCycle: 'Downgrades will be applied at the end of the current billing cycle',
   pricesInEUR: 'All prices are in EUR and exclude VAT where applicable',
   contactForEnterprise: 'Contact support@respoint.com for custom enterprise plans',
+  // Subscription plan features (copy)
+  planFeatureFreeReservations: 'Up to 10 reservations per month',
+  planFeatureFreeZones: '1 zone',
+  planFeatureFreeLayouts: '1 zone layout',
+  planFeatureFreeCoreTools: 'Core tools: reservation entry and floor plan drawing',
+  planFeatureProReservations: 'Up to 50 reservations per month',
+  planFeatureProZones: 'Up to 3 zones',
+  planFeatureProLayouts: 'Unlimited zone layouts',
+  planFeatureProStatistics: 'Statistics dashboard',
+  planFeatureProTimeline: 'Timeline scheduling',
+  planFeatureProCoreTools: 'Core tools included',
+  planFeatureProEmailSupport: 'Email support',
+  planFeatureEntEverythingInPro: 'Everything in Pro',
+  planFeatureEntUnlimitedReservations: 'Unlimited reservations',
+  planFeatureEntUnlimitedZones: 'Unlimited zones',
+  planFeatureEntGuestbook: 'Guestbook',
+  planFeatureEntWaiterTab: 'Waiter tab',
+  planFeatureEntPrioritySupport: 'Priority support',
 
   // POS Printer
   posPrinterTitle: 'POS Printer',
@@ -663,6 +721,13 @@ const englishTranslations: Translations = {
   choosePrinterPlaceholder: '-- Select printer --',
   saveAsPreferred: 'Save as preferred',
   windowsDefaultPrinter: 'Windows default:',
+
+  // POS Footer customization
+  receiptFooterTitle: 'Receipt footer',
+  footerLine1Label: 'Footer line 1',
+  footerLine2Label: 'Footer line 2',
+  saveFooter: 'Save footer',
+  editFooter: 'Edit footer',
   
   // Confirmation Messages
   deleteConfirmation: 'Are you sure you want to delete this item?',
@@ -749,12 +814,18 @@ const englishTranslations: Translations = {
   name: 'Name',
   table: 'Table',
   booked: 'BOOKED',
+  seated: 'SEATED',
+  cleared: 'CLEARED',
   arrivedQuestion: 'Arrived?',
   markAsArrived: 'Mark as arrived',
   markAsNotArrived: 'Mark as not arrived',
+  clearedQuestion: 'Cleared?',
+  markAsCleared: 'Mark as cleared',
+  markAsNotCleared: 'Keep occupied',
   noOpenReservations: 'There are no open reservations',
   noClosedReservations: 'There are no closed reservations.',
   addOneOnPlusButton: 'Add one on plus button...',
+  noSeatedReservations: 'There are no seated reservations.',
   
   // Reservation Form & Modal specific
   addNewReservation: 'Add New Reservation',
@@ -780,6 +851,7 @@ const englishTranslations: Translations = {
   tableNumber: 'Table number',
   removeTable: 'Remove table',
   serviceType: 'Service type',
+  popularServiceTypes: 'Popular service types',
   mobileNumber: 'Mobile number',
   additionalRequirements: 'Additional requirements',
   print: 'Print',
@@ -822,6 +894,10 @@ const englishTranslations: Translations = {
   nameRequired: 'Name is required',
   restaurantNameRequired: 'Restaurant name is required',
   guestNameRequired: 'Guest name is required',
+
+  // Color / Table color
+  tableColor: 'Table color',
+  chooseTableColor: 'Choose table color',
 };
 
 const serbianTranslations: Translations = {
@@ -847,7 +923,7 @@ const serbianTranslations: Translations = {
   notes: 'Napomene',
   selectTable: 'Izaberite sto',
   save: 'Sačuvaj',
-  cancel: 'Otkaži',
+  
   
   // Reservation Status
   confirmed: 'Potvrđena',
@@ -869,6 +945,8 @@ const serbianTranslations: Translations = {
   // Restaurant Info
   restaurantName: 'Naziv restorana',
   restaurantLogo: 'Logo restorana',
+  restaurantLogoDark: 'Logo restorana - Tamna tema',
+  restaurantLogoLight: 'Logo restorana - Svetla tema',
   printLogo: 'Logo za štampanje',
   uploadLogo: 'Otpremi logo',
   removeLogo: 'Ukloni logo',
@@ -1050,7 +1128,7 @@ const serbianTranslations: Translations = {
   cancellationFailedMessage: 'Otkazivanje pretplate nije uspelo. Pokušajte ponovo.',
   started: 'Počela',
   ends: 'Završava se',
-  active: 'Aktivna',
+  active: 'Aktivan',
   upgrade: 'Nadogradi',
   cancelSubscription: 'Otkaži',
   monthly: 'Mesečno',
@@ -1069,11 +1147,28 @@ const serbianTranslations: Translations = {
   loadingSubscriptionData: 'Učitava podatke o pretplati...',
   zones: 'Zone',
   usedThisMonth: 'iskorišćeno ovaj mesec',
-  created: 'kreirane',
   planChangesImmediate: 'Izmene plana stupaju na snagu odmah',
   downgradesEndOfCycle: 'Smanjenja plana će biti primenjena na kraju trenutnog ciklusa naplate',
   pricesInEUR: 'Sve cene su u EUR i ne uključuju PDV gde je primenljivo',
   contactForEnterprise: 'Kontaktirajte support@respoint.com za prilagođene enterprise planove',
+  // Subscription plan features (copy)
+  planFeatureFreeReservations: 'Do 10 rezervacija mesečno',
+  planFeatureFreeZones: '1 zona',
+  planFeatureFreeLayouts: '1 raspored zone',
+  planFeatureFreeCoreTools: 'Osnovni alati: unos rezervacija i crtanje šeme stolova',
+  planFeatureProReservations: 'Do 50 rezervacija mesečno',
+  planFeatureProZones: 'Do 3 zone',
+  planFeatureProLayouts: 'Neograničeno rasporeda zona',
+  planFeatureProStatistics: 'Statistički pregled',
+  planFeatureProTimeline: 'Timeline planiranje',
+  planFeatureProCoreTools: 'Osnovni alati uključeni',
+  planFeatureProEmailSupport: 'Email podrška',
+  planFeatureEntEverythingInPro: 'Sve iz Pro paketa',
+  planFeatureEntUnlimitedReservations: 'Neograničeno rezervacija',
+  planFeatureEntUnlimitedZones: 'Neograničeno zona',
+  planFeatureEntGuestbook: 'Knjiga gostiju (Guestbook)',
+  planFeatureEntWaiterTab: 'Kartica konobara',
+  planFeatureEntPrioritySupport: 'Prioritetna podrška',
 
   // POS Printer
   posPrinterTitle: 'POS štampač',
@@ -1083,6 +1178,13 @@ const serbianTranslations: Translations = {
   choosePrinterPlaceholder: '-- Izaberite štampač --',
   saveAsPreferred: 'Sačuvaj kao preferirani',
   windowsDefaultPrinter: 'Windows podrazumevani:',
+
+  // POS Footer customization
+  receiptFooterTitle: 'Tekst pri dnu računa',
+  footerLine1Label: 'Prva linija',
+  footerLine2Label: 'Druga linija',
+  saveFooter: 'Sačuvaj footer',
+  editFooter: 'Uredi footer',
   
   // Confirmation Messages
   deleteConfirmation: 'Da li ste sigurni da želite da obrišete ovu stavku?',
@@ -1169,12 +1271,18 @@ const serbianTranslations: Translations = {
   name: 'Ime',
   table: 'Stolovi',
   booked: 'REZERVACIJE',
+  seated: 'Smešteni',
+  cleared: 'Završeno',
   arrivedQuestion: 'Stigli?',
   markAsArrived: 'Označi kao stigli',
   markAsNotArrived: 'Označi kao nisu stigli',
+  clearedQuestion: 'Završeno?',
+  markAsCleared: 'Označi kao oslobođeno',
+  markAsNotCleared: 'Nije oslobođeno',
   noOpenReservations: 'Nema otvorenih rezervacija za',
-  noClosedReservations: 'Nema zatvorenih rezervacija.',
+  noClosedReservations: 'Nema završenih rezervacija.',
   addOneOnPlusButton: 'Dodajte na dugme plus...',
+  noSeatedReservations: 'Nema smeštenih rezervacija.',
   
   // Reservation Form & Modal specific
   addNewReservation: 'Dodaj novu rezervaciju',
@@ -1200,6 +1308,7 @@ const serbianTranslations: Translations = {
   tableNumber: 'Broj stola',
   removeTable: 'Ukloni sto',
   serviceType: 'Tip usluge',
+  popularServiceTypes: 'Popularni tipovi usluge',
   mobileNumber: 'Broj mobilnog',
   additionalRequirements: 'Dodatni zahtevi',
   print: 'Štampaj',
@@ -1221,7 +1330,7 @@ const serbianTranslations: Translations = {
   
   // Validation Messages
   invalidDateTime: 'Neispravan datum/vreme',
-  invalidDateTimeMessage: 'Rezervacija mora biti zakazana za budući datum i vreme. Molimo izaberite datum i vreme koji još nisu prošli.',
+  invalidDateTimeMessage: 'Rezervacija mora biti zakazana za budući datum i vreme. Izaberite termin koji još nije prošao.',
   tableUnavailable: 'Sto nije dostupan',
   tableUnavailableMessage: 'Sto "{table}" je već rezervisan u {time} na ovaj dan za gosta "{guest}".',
   tableNotFound: 'Sto nije pronađen',
@@ -1242,6 +1351,10 @@ const serbianTranslations: Translations = {
   nameRequired: 'Ime je obavezno',
   restaurantNameRequired: 'Ime restorana je obavezno',
   guestNameRequired: 'Ime gosta je obavezno',
+
+  // Color / Table color
+  tableColor: 'Boja stola',
+  chooseTableColor: 'Izaberi boju stola',
 };
 
 interface LanguageContextType {
@@ -1272,8 +1385,8 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
     setCurrentLanguage(language);
   };
 
-  const t = (key: keyof Translations): string => {
-    return translations[key] || key;
+  const t = (key: any): string => {
+    return (translations as any)[key] ?? String(key);
   };
 
   const getMonthNames = (): string[] => {

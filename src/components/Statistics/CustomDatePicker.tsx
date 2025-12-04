@@ -6,12 +6,24 @@ interface CustomDatePickerProps {
   onChange: (date: string) => void;
   type: 'date' | 'month';
   label: string;
+  // Optional: hide inline label (useful when parent renders its own label above)
+  hideInlineLabel?: boolean;
+  // Smaller visual scale for tight UIs
+  size?: 'md' | 'sm';
+  // Fixed dropdown width in pixels (ensures consistent width across screens)
+  dropdownWidth?: number;
+  // For embedding in forms: make trigger button match standard input height
+  matchInputHeight?: boolean;
+  // Where to show the dropdown relative to the trigger
+  placement?: 'bottom' | 'top';
 }
 
-const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, type, label }) => {
+const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, type, label, hideInlineLabel = false, size = 'md', dropdownWidth, matchInputHeight = false, placement = 'bottom' }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [viewDate, setViewDate] = useState(new Date(value));
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const isSmall = size === 'sm';
+  const computedDropdownWidth = dropdownWidth ?? (isSmall ? 220 : 280);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -38,6 +50,7 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
     const monthEnd = endOfMonth(viewDate);
     const startDate = startOfWeek(monthStart, { weekStartsOn: 1 });
     const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    const iconSize = isSmall ? 12 : 16;
 
     const days = [];
     let day = startDate;
@@ -50,27 +63,27 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
     const selectedDate = new Date(value);
 
     return (
-      <div className="bg-[#1E2A34] border border-gray-600 rounded-lg shadow-xl p-4 min-w-[280px]">
+      <div className={`bg-[#1E2A34] border border-gray-600 rounded-lg shadow-xl ${isSmall ? 'p-2' : 'p-4'}`} style={{ width: computedDropdownWidth }}>
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <button
             onClick={() => setViewDate(subMonths(viewDate, 1))}
-            className="p-1 hover:bg-gray-600 rounded transition-colors"
+            className={`${isSmall ? 'p-0.5' : 'p-1'} hover:bg-gray-300 rounded transition-colors`}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-300">
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-300">
               <polyline points="15,18 9,12 15,6"></polyline>
             </svg>
           </button>
           
-          <h3 className="text-white font-medium">
+          <h3 className={`text-white font-medium ${isSmall ? 'text-sm' : ''}`}>
             {format(viewDate, 'MMMM yyyy')}
           </h3>
           
           <button
             onClick={() => setViewDate(addMonths(viewDate, 1))}
-            className="p-1 hover:bg-gray-600 rounded transition-colors"
+            className={`${isSmall ? 'p-0.5' : 'p-1'} hover:bg-gray-300 rounded transition-colors`}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-300">
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-300">
               <polyline points="9,18 15,12 9,6"></polyline>
             </svg>
           </button>
@@ -80,8 +93,8 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
           <>
             {/* Days of week */}
             <div className="grid grid-cols-7 gap-1 mb-2">
-              {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(day => (
-                <div key={day} className="text-xs text-gray-400 text-center py-1 font-medium">
+              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(day => (
+                <div key={day} className={`${isSmall ? 'text-[10px]' : 'text-xs'} text-gray-400 text-center py-1 font-medium`}>
                   {day}
                 </div>
               ))}
@@ -99,13 +112,13 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
                     key={index}
                     onClick={() => handleDateSelect(day)}
                     className={`
-                      text-sm p-2 rounded transition-colors
+                      ${isSmall ? 'text-xs p-1' : 'text-sm p-2'} rounded transition-colors
                       ${!isCurrentMonth ? 'text-gray-500' : 'text-white'}
                       ${isSelected 
                         ? 'bg-[#FFB800] text-[#0A1929] font-medium' 
                         : isToday 
-                        ? 'bg-gray-600 text-white'
-                        : 'hover:bg-gray-600'
+                        ? 'bg-gray-300 text-white'
+                        : 'hover:bg-gray-300'
                       }
                     `}
                   >
@@ -131,7 +144,7 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
                     text-sm p-2 rounded transition-colors
                     ${isSelected 
                       ? 'bg-[#FFB800] text-[#0A1929] font-medium' 
-                      : 'text-white hover:bg-gray-600'
+                      : 'text-white hover:bg-gray-300'
                     }
                   `}
                 >
@@ -149,13 +162,13 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
               onChange(format(new Date(), type === 'date' ? 'yyyy-MM-dd' : 'yyyy-MM'));
               setIsOpen(false);
             }}
-            className="text-xs text-[#FFB800] hover:text-[#FFB800]/80 transition-colors"
+            className={`${isSmall ? 'text-[10px]' : 'text-xs'} text-[#FFB800] hover:text-[#FFB800]/80 transition-colors`}
           >
             Today
           </button>
           <button
             onClick={() => setIsOpen(false)}
-            className="text-xs text-gray-300 hover:text-white transition-colors"
+            className={`${isSmall ? 'text-[10px]' : 'text-xs'} text-gray-300 hover:text-white transition-colors`}
           >
             Close
           </button>
@@ -175,23 +188,30 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ value, onChange, ty
   return (
     <div className="relative" ref={dropdownRef}>
       <div className="flex items-center gap-2">
-        <label className="text-xs text-gray-500">{label}:</label>
+        {!hideInlineLabel && <label className="text-xs text-gray-500">{label}:</label>}
+        {(() => {
+          const triggerSizing = matchInputHeight
+            ? 'text-sm px-3 py-2 min-w-[120px] min-h-[42px]'
+            : (isSmall ? 'text-[10px] px-2 py-1 min-w-[90px]' : 'text-xs px-3 py-2 min-w-[120px]');
+          return (
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="bg-[#1E2A34] border border-[#2A3B4F] rounded text-white text-xs px-3 py-2 focus:border-[#FFB800] outline-none hover:border-[#FFB800]/50 transition-colors flex items-center gap-2 min-w-[120px] justify-between"
+          className={`bg-[#1E2A34] border border-[#2A3B4F] rounded text-white ${triggerSizing} focus:border-[#FFB800] outline-none hover:border-[#FFB800]/50 transition-colors flex items-center gap-2 justify-between`}
         >
           <span>{getDisplayValue()}</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+          <svg width={isSmall ? 12 : 14} height={isSmall ? 12 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
             <line x1="16" y1="2" x2="16" y2="6"></line>
             <line x1="8" y1="2" x2="8" y2="6"></line>
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
         </button>
+          );
+        })()}
       </div>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 z-[80]">
+        <div className={`absolute ${placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-[80]`}>
           {renderCalendar()}
         </div>
       )}

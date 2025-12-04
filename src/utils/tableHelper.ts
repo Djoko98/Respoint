@@ -9,10 +9,35 @@ export interface Table {
   y: number;
   width?: number;
   height?: number;
-  type?: 'rectangle' | 'circle';
+  type?: 'rectangle' | 'circle' | 'chair';
+  chairVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
   rotation?: number;
   color?: string;
   status?: 'available' | 'occupied' | 'inactive';
+  attachedToTableId?: string;
+  chairsLocked?: boolean;
+  chairGuides?: {
+    top?: number;
+    right?: number;
+    bottom?: number;
+    left?: number;
+    topVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    rightVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    bottomVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    leftVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerTL?: boolean;
+    cornerTR?: boolean;
+    cornerBR?: boolean;
+    cornerBL?: boolean;
+    cornerTLVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerTRVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerBRVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerBLVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    circleCount?: number;
+    circleStartDeg?: number;
+    circleVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    circleVariants?: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'>;
+  };
 }
 
 export interface ZoneLayouts {

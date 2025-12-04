@@ -1,5 +1,6 @@
 import React, { useState, useContext, useEffect } from 'react';
 import { LayoutProvider } from './context/LayoutContext';
+import { ReservationContext } from './context/ReservationContext';
 import { ReservationProvider, Reservation } from './context/ReservationContext';
 import { UserProvider, UserContext } from './context/UserContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
@@ -41,9 +42,10 @@ type ViewType = 'canvas' | 'dashboard' | 'statistics';
 
 const AppContent: React.FC = () => {
   const { t } = useLanguage();
-  const { isAuthenticated, login, signup, activeRole, user } = useContext(UserContext);
+  const { isAuthenticated, login, signup, activeRole, user, setActiveRole } = useContext(UserContext);
+  const { reservations } = useContext(ReservationContext);
   useEventReattacher(); // Use the event reattacher hook
-  const [selectedTool, setSelectedTool] = useState<'select' | 'table' | 'wall' | 'text' | 'delete'>('select');
+  const [selectedTool, setSelectedTool] = useState<'select' | 'table' | 'wall' | 'text' | 'chair' | 'delete'>('select');
   const [tableType, setTableType] = useState<'rectangle' | 'circle'>('rectangle');
   const [showReservationForm, setShowReservationForm] = useState(false);
   const [editReservation, setEditReservation] = useState<Reservation | null>(null);
@@ -110,21 +112,41 @@ const AppContent: React.FC = () => {
     })();
   }, [isAuthenticated, user?.id]);
 
-  // Show role unlock after login when no activeRole is set
+  // Show role unlock after login when no activeRole is set.
+  // If the account has no role PINs configured, skip the modal and enter with default role.
+  const roleSignature = user?.roleConfig?.map((role) => `${role.id}:${role.pinHash ? 1 : 0}`).join('|') || '';
+
   useEffect(() => {
-    if (isAuthenticated) {
-      // ensure we check sessionStorage in case activeRole exists but storage was cleared
-      const key = user?.id ? `respoint_active_role_${user.id}` : '';
-      const stored = key ? sessionStorage.getItem(key) : null;
-      if (!activeRole && !stored) {
-        setShowRoleUnlock(true);
-      } else {
-        setShowRoleUnlock(false);
-      }
-    } else {
+    if (!isAuthenticated) {
       setShowRoleUnlock(false);
+      return;
     }
-  }, [isAuthenticated, activeRole, user?.id]);
+
+    const key = user?.id ? `respoint_active_role_${user.id}` : '';
+    const stored = key ? sessionStorage.getItem(key) : null;
+
+    if (activeRole || stored) {
+      setShowRoleUnlock(false);
+      return;
+    }
+
+    const roleOptions = user?.roleConfig || [];
+    const firstRoleId = roleOptions[0]?.id;
+    const hasAnyPin = roleOptions.some((role) => role.pinHash);
+
+    if (!hasAnyPin && firstRoleId) {
+      setActiveRole(firstRoleId);
+      setShowRoleUnlock(false);
+      return;
+    }
+
+    if (!roleOptions.length) {
+      setShowRoleUnlock(false);
+      return;
+    }
+
+    setShowRoleUnlock(true);
+  }, [isAuthenticated, activeRole, user?.id, roleSignature, setActiveRole]);
 
   // Check for updates right after successful login
   useEffect(() => {
@@ -147,6 +169,29 @@ const AppContent: React.FC = () => {
         setUpdateInfo({ version: handle.version, notes: handle.notes });
       }
     })();
+  }, []);
+
+  // Auto-zoom for small screens to preserve desktop layout without reflow (applies only to content area, not TitleBar)
+  useEffect(() => {
+    const BASE_W = 1280;
+    const BASE_H = 768;
+    const MIN_PERCENT = 60; // keep consistent size across resolutions
+    const applyAutoZoom = () => {
+      try {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const scale = Math.min(w / BASE_W, h / BASE_H, 1);
+        const percent = Math.max(MIN_PERCENT, Math.floor(scale * 100));
+        const root = document.getElementById('app-zoom-root');
+        if (root) {
+          (root as HTMLElement).style.zoom = `${percent}%`;
+        }
+        try { localStorage.setItem('app-zoom-level', String(percent)); } catch {}
+      } catch {}
+    };
+    applyAutoZoom();
+    window.addEventListener('resize', applyAutoZoom);
+    return () => window.removeEventListener('resize', applyAutoZoom);
   }, []);
 
   const validateLoginForm = () => {
@@ -246,7 +291,13 @@ const AppContent: React.FC = () => {
 
   // Open reservation form when requested globally (e.g., from Guestbook)
   useEffect(() => {
-    const openHandler = () => {
+    const openHandler = (e?: CustomEvent) => {
+      const id = (e as any)?.detail?.reservationId as string | undefined;
+      if (id) {
+        const res = reservations.find(r => r.id === id) || null;
+        handleOpenReservationForm(res || undefined);
+        return;
+      }
       handleOpenReservationForm();
       // Dispatch prefill after a short delay to ensure form is mounted
       setTimeout(() => {
@@ -256,7 +307,8 @@ const AppContent: React.FC = () => {
           if (payload) {
             (window as any).dispatchEvent(new CustomEvent('prefill-reservation', { detail: {
               guestName: payload.guestName || '',
-              phone: payload.phone || ''
+              phone: payload.phone || '',
+              tableNumbers: Array.isArray(payload.tableNumbers) ? payload.tableNumbers : []
             }}));
             localStorage.removeItem(PREFILL_KEY);
           }
@@ -265,7 +317,7 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('respoint-open-reservation', openHandler as any);
     return () => window.removeEventListener('respoint-open-reservation', openHandler as any);
-  }, []);
+  }, [reservations]);
 
   const handleCloseReservationForm = () => {
     setShowReservationForm(false);
@@ -731,7 +783,7 @@ function App() {
               <LayoutProvider>
                 <div className="flex flex-col h-full bg-[#010A16]">
                   <TitleBar />
-                  <div className="flex-1 min-h-0 overflow-hidden">
+                  <div id="app-zoom-root" className="flex-1 min-h-0 overflow-hidden">
                     <AppContent />
                   </div>
                 </div>

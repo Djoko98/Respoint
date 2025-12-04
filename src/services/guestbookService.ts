@@ -113,6 +113,125 @@ export const guestbookService = {
         await supabase.from('guestbook_entries').delete().eq('user_id', user.id).eq('id', id);
       }
     } catch {}
+  },
+
+  // Count future (upcoming) reservations for a guest by name (or phone fallback)
+  countUpcomingVisits: async (guestName?: string, guestPhone?: string): Promise<number> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) return 0;
+
+      const now = new Date();
+      const yyyy = String(now.getFullYear());
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mi = String(now.getMinutes()).padStart(2, '0');
+      const today = `${yyyy}-${mm}-${dd}`;
+      const nowTime = `${hh}:${mi}`;
+
+      // Base query: same user, not deleted, not cancelled, date >= today
+      let query = supabase
+        .from('reservations')
+        .select('id,date,time,guest_name,phone,status,is_deleted')
+        .eq('user_id', user.id)
+        .gte('date', today)
+        .neq('status', 'cancelled')
+        .neq('is_deleted', true);
+
+      // Match by name primarily; fallback to phone if name is empty
+      if (guestName && guestName.trim()) {
+        query = query.ilike('guest_name', guestName.trim());
+      } else if (guestPhone && guestPhone.trim()) {
+        query = query.eq('phone', guestPhone.trim());
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const rows = Array.isArray(data) ? data : [];
+      // Filter out earlier times today
+      const upcoming = rows.filter((r: any) => {
+        const d = String(r?.date || '');
+        const t = String(r?.time || '');
+        if (!d) return false;
+        if (d > today) return true;
+        if (d === today) {
+          if (!t) return false;
+          return t >= nowTime;
+        }
+        return false;
+      });
+      return upcoming.length;
+    } catch {
+      return 0;
+    }
+  },
+
+  // Detailed list of future (upcoming) reservations
+  listUpcomingVisits: async (guestName?: string, guestPhone?: string): Promise<Array<{
+    id: string;
+    date: string;
+    time: string;
+    number_of_guests: number;
+    zone_id?: string;
+    table_ids?: any;
+    status: string;
+    color?: string;
+    phone?: string;
+  }>> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) return [];
+
+      const now = new Date();
+      const yyyy = String(now.getFullYear());
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mi = String(now.getMinutes()).padStart(2, '0');
+      const today = `${yyyy}-${mm}-${dd}`;
+      const nowTime = `${hh}:${mi}`;
+
+      let query = supabase
+        .from('reservations')
+        .select('id,date,time,number_of_guests,zone_id,table_ids,status,color,phone,guest_name,is_deleted')
+        .eq('user_id', user.id)
+        .gte('date', today)
+        .neq('status', 'cancelled')
+        .neq('is_deleted', true);
+
+      if (guestName && guestName.trim()) {
+        query = query.ilike('guest_name', guestName.trim());
+      } else if (guestPhone && guestPhone.trim()) {
+        query = query.eq('phone', guestPhone.trim());
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const rows = Array.isArray(data) ? data : [];
+
+      // Filter earlier times today; then sort by date/time ascending
+      const filtered = rows.filter((r: any) => {
+        const d = String(r?.date || '');
+        const t = String(r?.time || '');
+        if (!d) return false;
+        if (d > today) return true;
+        if (d === today) {
+          if (!t) return false;
+          return t >= nowTime;
+        }
+        return false;
+      }).sort((a: any, b: any) => {
+        const adt = `${a.date || ''} ${a.time || ''}`.trim();
+        const bdt = `${b.date || ''} ${b.time || ''}`.trim();
+        return adt.localeCompare(bdt);
+      });
+
+      return filtered as any;
+    } catch {
+      return [];
+    }
   }
 };
 
@@ -130,6 +249,17 @@ function fromDbRow(row: any): GuestbookEntry {
     preferredSeating: row.preferred_seating || '',
     favoriteDrinks: row.favorite_drinks || '',
     favoriteFoods: row.favorite_foods || '',
+    allergens: row.allergens || '',
+    instagram: row.instagram || '',
+    facebook: row.facebook || '',
+    tiktok: row.tiktok || '',
+    twitter: row.twitter || '',
+    website: row.website || '',
+    birthDate: row.birth_date || '',
+    location: row.location || '',
+    favoriteWine: row.favorite_wine || '',
+    foodRequests: row.food_requests || '',
+    drinkRequests: row.drink_requests || '',
     averageBill: row.average_bill ?? undefined,
     notes: row.notes || '',
     lastVisitAt: row.last_visit_at || '',
@@ -162,6 +292,17 @@ function toDbRow(entry: GuestbookEntry, userId: string) {
     preferred_seating: entry.preferredSeating || null,
     favorite_drinks: entry.favoriteDrinks || null,
     favorite_foods: entry.favoriteFoods || null,
+    allergens: entry.allergens || null,
+    instagram: entry.instagram || null,
+    facebook: entry.facebook || null,
+    tiktok: entry.tiktok || null,
+    twitter: entry.twitter || null,
+    website: entry.website || null,
+    birth_date: entry.birthDate || null,
+    location: entry.location || null,
+    favorite_wine: entry.favoriteWine || null,
+    food_requests: entry.foodRequests || null,
+    drink_requests: entry.drinkRequests || null,
     average_bill: typeof entry.averageBill === 'number' ? entry.averageBill : (entry.averageBill ? Number(entry.averageBill as any) : null),
     notes: entry.notes || null,
     last_visit_at: entry.lastVisitAt || null,

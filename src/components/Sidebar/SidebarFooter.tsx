@@ -7,6 +7,7 @@ import { useLanguage } from "../../context/LanguageContext";
 import { setAssignedWaiter } from "../../utils/waiters";
 import { getZoomAdjustedScreenCoordinates } from "../../utils/zoom";
 import { ThemeContext } from "../../context/ThemeContext";
+import { useRolePermissions } from "../../hooks/useRolePermissions";
 
 interface SidebarFooterProps {
   onAddReservation: () => void;
@@ -17,7 +18,9 @@ const STORAGE_KEY = "respoint_waiters";
 interface WaiterItem { id?: string; name: string }
 
 const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
-  const { user, activeRole } = useContext(UserContext);
+  const { user } = useContext(UserContext);
+  const { hasPermission } = useRolePermissions();
+  const canManageWaiters = hasPermission('manage_waiters');
   const { t, currentLanguage } = useLanguage();
   const { theme } = useContext(ThemeContext);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -110,6 +113,8 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
         setNewWaiterName("");
         // ensure timeline returns when panel is closed via outside click
         setTimeout(() => { try { window.dispatchEvent(new CustomEvent('waiter-close')); } catch {} }, 250);
+        // remove focus state from the waiter button so it doesn't stay visually selected
+        try { waiterBtnRef.current?.blur(); } catch {}
       }
     };
     document.addEventListener("mousedown", handleClick);
@@ -124,7 +129,8 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
         setIsPanelOpen(false);
         setIsAdding(false);
         setNewWaiterName("");
-        waiterBtnRef.current?.focus();
+        // remove focus state so icon doesn't remain selected after closing with Escape
+        waiterBtnRef.current?.blur();
         // ensure timeline returns when panel is closed via Escape
         setTimeout(() => { try { window.dispatchEvent(new CustomEvent('waiter-close')); } catch {} }, 250);
       }
@@ -132,6 +138,18 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isPanelOpen]);
+
+  // Also respond to external waiter-close events by clearing focus/selection on the icon
+  useEffect(() => {
+    const onExternalClose = () => {
+      setIsPanelOpen(false);
+      setIsAdding(false);
+      setNewWaiterName("");
+      try { waiterBtnRef.current?.blur(); } catch {}
+    };
+    window.addEventListener('waiter-close', onExternalClose as any);
+    return () => window.removeEventListener('waiter-close', onExternalClose as any);
+  }, []);
 
   // Focus input when starting to add
   useEffect(() => {
@@ -250,6 +268,63 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
     document.addEventListener('mouseup', onUp);
   };
 
+  const startCustomDragTouch = (name: string, e: React.TouchEvent) => {
+    if (!e.touches || e.touches.length === 0) return;
+    e.preventDefault();
+    isDraggingWaiterRef.current = true;
+
+    const t0 = e.touches[0];
+    const ghost = document.createElement('div');
+    ghost.className = 'fixed z-[9999] pointer-events-none px-2 py-1 rounded-full bg-[#0F243A] border border-gray-800 text-gray-200 text-xs shadow-xl';
+    ghost.textContent = name;
+    {
+      const { x, y } = getZoomAdjustedScreenCoordinates(t0.clientX, t0.clientY);
+      ghost.style.left = `${x + 10}px`;
+      ghost.style.top = `${y + 10}px`;
+    }
+    document.body.appendChild(ghost);
+    ghostRef.current = ghost;
+
+    const onMove = (ev: TouchEvent) => {
+      if (!ghostRef.current) return;
+      const t = ev.touches && ev.touches[0];
+      if (!t) return;
+      ev.preventDefault();
+      const { x, y } = getZoomAdjustedScreenCoordinates(t.clientX, t.clientY);
+      ghostRef.current.style.left = `${x + 10}px`;
+      ghostRef.current.style.top = `${y + 10}px`;
+    };
+
+    const onEnd = (ev: TouchEvent) => {
+      document.removeEventListener('touchmove', onMove as any);
+      document.removeEventListener('touchend', onEnd as any);
+      if (ghostRef.current) { ghostRef.current.remove(); ghostRef.current = null; }
+      isDraggingWaiterRef.current = false;
+
+      const t = ev.changedTouches && ev.changedTouches[0];
+      if (!t) return;
+      const target = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
+      let node: HTMLElement | null = target;
+      let reservationId: string | null = null;
+      while (node && node !== document.body) {
+        const rid = node.getAttribute && node.getAttribute('data-reservation-id');
+        const rid2 = node.getAttribute && node.getAttribute('data-table-reservation-id');
+        if (rid) { reservationId = rid; break; }
+        if (rid2) { reservationId = rid2; break; }
+        node = node.parentElement as HTMLElement | null;
+      }
+      if (reservationId) {
+        try {
+          setAssignedWaiter(reservationId, name);
+        } catch {}
+        try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId, name } })); } catch {}
+      }
+    };
+
+    document.addEventListener('touchmove', onMove as any, { passive: false });
+    document.addEventListener('touchend', onEnd as any, { passive: false });
+  };
+
   // Manage body class to hide timeline while panel is open
   useEffect(() => {
     if (isPanelOpen) {
@@ -262,6 +337,13 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
 
   const [isGuestbookOpen, setIsGuestbookOpen] = useState(false);
   const GuestbookModalLazy = React.useMemo(() => React.lazy(() => import('./GuestbookModal')), []);
+
+  // Open Guestbook in response to global event
+  useEffect(() => {
+    const onOpen = () => setIsGuestbookOpen(true);
+    window.addEventListener('respoint-open-guestbook', onOpen as any);
+    return () => window.removeEventListener('respoint-open-guestbook', onOpen as any);
+  }, []);
 
   return (
     <div ref={footerRef} className="relative p-4 border-t border-[#1E2A34]">
@@ -294,9 +376,13 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
         ref={waiterBtnRef}
         aria-label="Manage waiters"
         aria-expanded={isPanelOpen}
-        className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none absolute left-[75%] -translate-x-1/2 top-1/2 -translate-y-1/2 ${activeRole === 'waiter' ? 'opacity-50 cursor-not-allowed' : `focus:ring-2 hover:ring-2 ${theme === 'light' ? 'focus:ring-black/40 hover:ring-black/30' : 'focus:ring-white/60 hover:ring-white/80'}`}`}
+        className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-all duration-200 focus:outline-none absolute left-[75%] -translate-x-1/2 top-1/2 -translate-y-1/2 ${
+          !canManageWaiters
+            ? 'opacity-50 cursor-not-allowed'
+            : `focus:ring-2 hover:ring-2 ${theme === 'light' ? 'focus:ring-black/40 hover:ring-black/30' : 'focus:ring-white/60 hover:ring-white/80'}`
+        }`}
         onClick={() => {
-          if (activeRole === 'waiter') return;
+          if (!canManageWaiters) return;
           setTimeout(() => {}, 0);
           if (!isPanelOpen) {
             try { window.dispatchEvent(new CustomEvent('waiter-open')); } catch {}
@@ -304,6 +390,8 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
           } else {
             setIsPanelOpen(false);
             setTimeout(() => { try { window.dispatchEvent(new CustomEvent('waiter-close')); } catch {} }, 250);
+            // Clear focus so the icon doesn't remain visually selected
+            try { waiterBtnRef.current?.blur(); } catch {}
           }
         }}
       >
@@ -323,7 +411,7 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
             transition={{ type: "spring", stiffness: 300, damping: 24 }}
             className="fixed left-80 right-0 bottom-0 z-[200]"
           >
-            <div className="w-full h-20 flex items-center bg-[#000814] border border-gray-800 shadow-2xl px-3">
+            <div className="w-full h-20 flex items-center bg-[#000814] border-t border-[#1E2A34] px-3">
               <div className="flex flex-wrap items-center gap-2">
                 {/* Plus chip (always first) */}
                 <button
@@ -345,7 +433,7 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
                     onChange={(e) => setNewWaiterName(e.target.value)}
                     onBlur={commitNewWaiter}
                     onKeyDown={handleInputKeyDown}
-                    className="px-3 py-2 text-sm rounded border bg-[#0A1929] border-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-gray-600"
+                    className="px-3 py-2 text-sm rounded-full border bg-[#0A1929] border-gray-800 text-white placeholder-gray-500 focus:outline-none focus:border-gray-600"
                     placeholder={currentLanguage === 'srb' ? 'Unesi ime' : 'Enter name'}
                   />)
                 }
@@ -357,6 +445,8 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
                     className="group relative inline-flex items-center px-2.5 py-1 rounded-full bg-[#0F243A] border border-gray-800 text-gray-200 text-xs select-none cursor-grab active:cursor-grabbing"
                     aria-label={`Waiter ${w.name}`}
                     onMouseDown={(e) => startCustomDrag(w.name, e)}
+                    onTouchStart={(e) => startCustomDragTouch(w.name, e)}
+                    style={{ touchAction: 'none' }}
                   >
                     <span className="mr-1 inline-flex">
                       <UserRound size={12} className="text-gray-400" />

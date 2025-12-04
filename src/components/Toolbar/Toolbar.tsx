@@ -1,6 +1,8 @@
 import React, { useContext, useState } from "react";
 import { LayoutContext } from "../../context/LayoutContext";
 import { UserContext } from "../../context/UserContext";
+import { ThemeContext } from "../../context/ThemeContext";
+import { useRolePermissions } from "../../hooks/useRolePermissions";
 
 interface Tool {
   id: string;
@@ -29,9 +31,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onResetLayout
 }) => {
   const { isAuthenticated } = useContext(UserContext);
+  const { hasPermission } = useRolePermissions();
   const { layout } = useContext(LayoutContext);
+  const { theme } = useContext(ThemeContext);
   const [showTableOptions, setShowTableOptions] = useState(false);
   const [fontSize, setFontSize] = useState(16);
+  const isLight = theme === 'light';
+
+  // Editing is allowed only when the active role has edit permissions
+  const canEdit = isAuthenticated && hasPermission('edit_layout');
 
   const tools: Tool[] = [
     {
@@ -119,7 +127,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
       <div
         className={
           `flex flex-col gap-3 p-4 border-r ` +
-          (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
+          (isLight ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
         }
       >
         <div className="text-gray-500 text-sm text-center">
@@ -133,7 +141,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
     <div
       className={
         `flex flex-col gap-3 p-4 border-r ` +
-        (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
+        (isLight ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800')
       }
     >
       {/* Main tools */}
@@ -142,11 +150,17 @@ const Toolbar: React.FC<ToolbarProps> = ({
           <div key={tool.id} className="relative">
             <button
               className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition ${
-                selectedTool === tool.id
-                  ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-yellow-100 text-yellow-800' : 'bg-accent text-white')
-                  : (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white')
+                // Disabled styling for tools that modify layout when user cannot edit
+                (!canEdit && tool.id !== 'select')
+                  ? (isLight
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                      : 'bg-gray-800 text-gray-600 cursor-not-allowed opacity-50')
+                  : (selectedTool === tool.id
+                      ? (isLight ? 'bg-yellow-100 text-yellow-800' : 'bg-accent text-white')
+                      : (isLight ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'))
               }`}
               onClick={() => {
+                if (!canEdit && tool.id !== 'select') return;
                 if (tool.id === 'table') {
                   setShowTableOptions(!showTableOptions);
                 } else {
@@ -164,14 +178,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
             {tool.id === 'table' && showTableOptions && (
               <div className={
                 `absolute left-full ml-2 top-0 rounded-lg shadow-lg p-2 z-[80] ` +
-                (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white border border-gray-200' : 'bg-gray-800')
+                (isLight ? 'bg-white border border-gray-200' : 'bg-gray-800')
               }>
                 <button
                   className={
                     `w-full flex items-center gap-2 px-3 py-2 rounded text-sm ` +
-                    (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
+                    (isLight ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
                   }
                   onClick={() => {
+                    if (!canEdit) return;
                     onAddTable('rectangle');
                     setShowTableOptions(false);
                     onToolChange('table');
@@ -185,9 +200,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
                 <button
                   className={
                     `w-full flex items-center gap-2 px-3 py-2 rounded text-sm ` +
-                    (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
+                    (isLight ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-700 text-gray-300 hover:text-white')
                   }
                   onClick={() => {
+                    if (!canEdit) return;
                     onAddTable('circle');
                     setShowTableOptions(false);
                     onToolChange('table');
@@ -207,11 +223,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Font size selector for text tool */}
       {selectedTool === 'text' && (
         <div className="mt-2">
-          <label className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-xs text-gray-500' : 'text-xs text-gray-400'}>Font size</label>
+          <label className={isLight ? 'text-xs text-gray-500' : 'text-xs text-gray-400'}>Font size</label>
           <select 
-            className={
-              document.documentElement.getAttribute('data-theme') === 'light' ? 'w-full bg-white text-gray-900 border border-gray-200 rounded px-2 py-1 mt-1' : 'w-full bg-gray-800 text-white rounded px-2 py-1 mt-1'
-            }
+            className="respoint-select mt-1"
             value={fontSize}
             onChange={(e) => setFontSize(Number(e.target.value))}
           >
@@ -226,7 +240,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
       {/* Separator */}
-      <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t border-gray-200 my-2' : 'border-t border-gray-700 my-2'}></div>
+      <div className={isLight ? 'border-t border-gray-200 my-2' : 'border-t border-gray-700 my-2'}></div>
 
       {/* Action tools */}
       <div className="flex flex-col gap-2">
@@ -235,9 +249,11 @@ const Toolbar: React.FC<ToolbarProps> = ({
             key={tool.id}
             className={
               `flex items-center gap-2 px-3 py-2 rounded-lg transition ` +
-              (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white')
+              (!canEdit
+                ? (isLight ? 'bg-gray-100 text-gray-400 opacity-50 cursor-not-allowed' : 'bg-gray-800 text-gray-600 opacity-50 cursor-not-allowed')
+                : (isLight ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'))
             }
-            onClick={tool.action}
+            onClick={() => { if (!canEdit) return; tool.action && tool.action(); }}
             title={tool.label}
           >
             {tool.icon}

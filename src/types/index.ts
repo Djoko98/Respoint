@@ -1,5 +1,5 @@
 // User and Profile types
-export type { User, UserRole, ProfileDB } from './user';
+export type { User, UserRole, ProfileDB, RoleConfigEntry, RolePermissionKey } from './user';
 
 // Zone types
 export type { Zone, ZoneDB } from './zone';

@@ -1,8 +1,78 @@
 import React, { createContext, useState, ReactNode, useEffect } from "react";
 import { supabase } from "../utils/supabaseClient";
-import { User, UserRole } from "../types/user";
+import { User, UserRole, RoleConfigEntry, RolePermissionKey } from "../types/user";
 import { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { LoadingScreen } from '../components/common/LoadingScreen';
+import { DEFAULT_ROLE_TEMPLATES, MAX_ROLE_COUNT, sanitizePermissions } from "../constants/rolePermissions";
+
+const generateRoleId = () => {
+  try {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+  } catch {}
+  return `role-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const buildDefaultRoleConfig = (profile?: any): RoleConfigEntry[] => {
+  return DEFAULT_ROLE_TEMPLATES.map((template) => {
+    let pinHash: string | null = null;
+    if (template.id === 'role-admin') {
+      pinHash = (profile as any)?.admin_pin_hash || null;
+    } else if (template.id === 'role-manager') {
+      pinHash = (profile as any)?.manager_pin_hash || null;
+    } else if (template.id === 'role-waiter') {
+      pinHash = (profile as any)?.waiter_pin_hash || null;
+    }
+    return {
+      id: template.id,
+      name: template.name,
+      permissions: [...template.permissions],
+      pinHash,
+    };
+  });
+};
+
+const normalizeRoleConfig = (rawConfig: any, profile?: any): RoleConfigEntry[] => {
+  if (!Array.isArray(rawConfig)) {
+    return buildDefaultRoleConfig(profile);
+  }
+
+  const seen = new Set<string>();
+  const sanitized: RoleConfigEntry[] = [];
+
+  for (const entry of rawConfig) {
+    if (!entry) continue;
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!name) continue;
+    const id =
+      typeof entry.id === 'string' && entry.id.trim()
+        ? entry.id.trim()
+        : generateRoleId();
+
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    const permissions = Array.isArray(entry.permissions)
+      ? sanitizePermissions(entry.permissions as RolePermissionKey[])
+      : [];
+
+    sanitized.push({
+      id,
+      name,
+      permissions,
+      pinHash:
+        typeof entry.pinHash === 'string' && entry.pinHash.length > 0
+          ? entry.pinHash
+          : null,
+    });
+  }
+
+  return sanitized.length ? sanitized.slice(0, MAX_ROLE_COUNT) : buildDefaultRoleConfig(profile);
+};
+
+const hasPinForRoleId = (roles: RoleConfigEntry[], targetId: string) =>
+  Boolean(roles.find((role) => role.id === targetId && role.pinHash));
 
 interface UserContextType {
   user: User | null;
@@ -36,25 +106,28 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [activeRole, setActiveRoleState] = useState<UserRole | null>(null);
 
   // Persist active role per-session (cleared on browser refresh or logout)
+  const roleSignature = user?.roleConfig?.map((role) => role.id).join('|') || '';
+
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && user?.roleConfig?.length) {
       const key = `respoint_active_role_${user.id}`;
       const stored = sessionStorage.getItem(key);
-      if (stored === 'admin' || stored === 'manager' || stored === 'waiter') {
-        setActiveRoleState(stored as UserRole);
-      } else {
-        setActiveRoleState(null);
-      }
+      const match = user.roleConfig.find((role) => role.id === stored);
+      setActiveRoleState(match ? match.id : null);
     } else {
       setActiveRoleState(null);
     }
-  }, [user?.id]);
+  }, [user?.id, roleSignature]);
 
-  const setActiveRole = (role: UserRole | null) => {
-    setActiveRoleState(role);
+  const setActiveRole = (roleId: UserRole | null) => {
+    const nextRoleId =
+      roleId && user?.roleConfig?.some((role) => role.id === roleId)
+        ? roleId
+        : null;
+    setActiveRoleState(nextRoleId);
     if (user?.id) {
       const key = `respoint_active_role_${user.id}`;
-      if (role) sessionStorage.setItem(key, role);
+      if (nextRoleId) sessionStorage.setItem(key, nextRoleId);
       else sessionStorage.removeItem(key);
     }
   };
@@ -403,6 +476,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           hasAdminPin: false,
           hasManagerPin: false,
           hasWaiterPin: false,
+          roleConfig: buildDefaultRoleConfig(),
         });
         return;
       }
@@ -425,6 +499,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.error('❌ Error creating profile:', insertError);
         }
 
+        const roleConfig = buildDefaultRoleConfig();
+
         // Set user data regardless of insert success
         const newUser = {
           id: session.user.id,
@@ -442,12 +518,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           hasAdminPin: false,
           hasManagerPin: false,
           hasWaiterPin: false,
+          roleConfig,
         };
         console.log('✅ UserContext: Setting new user with profile:', newUser);
         setUser(newUser);
       } else {
         console.log('✅ Profile loaded successfully:', profile);
         console.log('🖼️ Logo URL from database:', profile.logo);
+        const roleConfig = normalizeRoleConfig((profile as any)?.role_config, profile);
         
         const existingUser = {
           id: session.user.id,
@@ -458,13 +536,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           phone: profile.phone || '',
           address: profile.address || '',
           logo: profile.logo || '', // Logo URL se učitava iz logo kolone
+          logoLightUrl: (profile as any).logo_light_url || '',
           printLogoUrl: profile.print_logo_url || '', // Print logo URL za štampanje
           timezone: profile.timezone || 'Europe/Belgrade',
           language: profile.language || 'eng',
           autoArchive: profile.auto_archive ?? true,
-          hasAdminPin: Boolean((profile as any).admin_pin_hash),
-          hasManagerPin: Boolean((profile as any).manager_pin_hash),
-          hasWaiterPin: Boolean((profile as any).waiter_pin_hash),
+          hasAdminPin: hasPinForRoleId(roleConfig, 'role-admin'),
+          hasManagerPin: hasPinForRoleId(roleConfig, 'role-manager'),
+          hasWaiterPin: hasPinForRoleId(roleConfig, 'role-waiter'),
+          roleConfig,
         };
         console.log('✅ UserContext: Setting existing user with profile:', existingUser);
         setUser(existingUser);
@@ -488,6 +568,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         hasAdminPin: false,
         hasManagerPin: false,
         hasWaiterPin: false,
+        roleConfig: buildDefaultRoleConfig(),
       });
     }
   };

@@ -2,10 +2,12 @@ import React, { useState, useContext, useRef, useEffect, useCallback } from "rea
 import { useCanvasLayout, Layout } from "../../hooks/useCanvasLayout";
 import { ZoneContext } from "../../context/ZoneContext";
 import { UserContext } from "../../context/UserContext";
+import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { ReservationContext } from "../../context/ReservationContext";
 import { Reservation } from "../../types/reservation";
 import ReservationForm from "../ReservationForm/ReservationForm";
 import TimelineBar from "./TimelineBar";
+import TimelineOverlay from "./TimelineOverlay";
 import FloatingToolbar from "../Toolbar/FloatingToolbar";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 import { formatTableNames } from "../../utils/tableHelper";
@@ -14,6 +16,9 @@ import { getAssignedWaiters, setAssignedWaiter, removeAssignedWaiter } from "../
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { getZoom, getZoomAdjustedCoordinates, getZoomAdjustedScreenCoordinates, adjustValueForZoom } from "../../utils/zoom";
+import { loadFromStorage, saveToStorage } from "../../utils/storage";
+import { ThemeContext } from "../../context/ThemeContext";
+import AddSeatsModal from "./AddSeatsModal";
 
 // Layout List Component
 interface LayoutListProps {
@@ -35,19 +40,28 @@ const LayoutList: React.FC<LayoutListProps> = ({
 }) => {
   const { currentZone } = useContext(ZoneContext);
   const { t } = useLanguage();
+  const { theme } = useContext(ThemeContext);
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showDeleteLayoutModal, setShowDeleteLayoutModal] = useState(false);
   const [layoutToDelete, setLayoutToDelete] = useState<string | null>(null);
+  // Access current working layout to reflect live table count for default layout
+  const { layout: workingLayout } = useCanvasLayout();
 
   const zoneSavedLayouts = currentZone ? (savedLayouts[currentZone.id] || []) : [];
   const defaultLayout = getDefaultLayout();
   
+  // Helper: count only real tables, exclude chairs stored in tables array
+  const countRealTables = (layoutData: any): number => {
+    const tables = Array.isArray(layoutData?.tables) ? layoutData.tables : [];
+    return tables.filter((t: any) => t?.type !== 'chair').length;
+  };
+  
   // Debug log when savedLayouts change
   useEffect(() => {
     console.log('Layout list updated. Zone:', currentZone?.id, 'Layouts count:', zoneSavedLayouts.length);
-    zoneSavedLayouts.forEach((layout: any) => {
-      console.log(`- ${layout.name}: ${layout.layout.tables.length} tables`);
+    zoneSavedLayouts.forEach((sl: any) => {
+      console.log(`- ${sl.name}: ${countRealTables(sl.layout)} tables (real)`);
     });
   }, [savedLayouts, currentZone]);
 
@@ -85,7 +99,13 @@ const LayoutList: React.FC<LayoutListProps> = ({
   };
 
   return (
-    <div className="absolute right-0 top-8 bottom-0 w-56 bg-[#000814] border-l border-[#1E2A34] shadow-2xl z-40 flex flex-col">
+    <motion.div 
+      initial={{ y: -16, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: -16, opacity: 0 }}
+      transition={{ type: 'tween', duration: 0.2 }}
+      className="absolute right-0 top-10 bottom-0 w-56 bg-[#000814] border-l border-[#1E2A34] shadow-2xl z-[960] flex flex-col"
+    >
       <div className="px-3 py-2.5 border-b border-[#1E2A34] flex justify-between items-center">
         <h3 className="text-white font-normal text-sm">{t('savedLayouts')}</h3>
         <div className="flex items-center gap-1">
@@ -114,38 +134,51 @@ const LayoutList: React.FC<LayoutListProps> = ({
           <p className="text-gray-500 text-center py-8 text-xs">{t('noSavedLayoutsYet')}</p>
         ) : (
           <div className="space-y-1.5">
-            {zoneSavedLayouts.map((layout: any) => (
+            {zoneSavedLayouts.map((savedLayout: any) => (
               <div
-                key={layout.id}
-                className={`bg-[#0A1929] rounded p-2 cursor-pointer hover:bg-[#1E2A34] transition-all border ${
-                  selectedLayoutId === layout.id ? 'border-blue-500' : 
-                  currentLayoutId === layout.id ? 'border-green-500' : 'border-transparent'
+                key={savedLayout.id}
+                className={`rounded p-2 cursor-pointer transition-colors border ${
+                  theme === 'light'
+                    ? 'bg-[#F8FAFC] hover:bg-white'
+                    : 'bg-[#0A1929] hover:bg-[#0A1929]/80'
+                } ${
+                  selectedLayoutId === savedLayout.id
+                    ? 'border-blue-500'
+                    : currentLayoutId === savedLayout.id
+                    ? 'border-green-500'
+                    : 'border-transparent'
                 }`}
-                onClick={() => setSelectedLayoutId(layout.id)}
-                onDoubleClick={() => handleLoad(layout.id)}
+                onClick={() => setSelectedLayoutId(savedLayout.id)}
+                onDoubleClick={() => handleLoad(savedLayout.id)}
               >
                 <div className="flex justify-between items-start">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <h4 className="text-white font-medium text-xs truncate">
-                            {layout.name}
+                            {savedLayout.name}
                         </h4>
-                        {currentLayoutId === layout.id && (
+                        {currentLayoutId === savedLayout.id && (
                             <div className="w-2 h-2 bg-green-400 rounded-full" title={t('active')}></div>
                         )}
                     </div>
-                    {layout.is_default && (
+                    {savedLayout.is_default && (
                     <span className="text-xs bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded-full inline-block mt-0.5">{t('default')}</span>
                     )}
                     <p className="text-gray-500 text-xs mt-0.5">
-                    {formatDate(layout.created_at)}
+                    {formatDate(savedLayout.created_at)}
                     </p>
                     <p className="text-gray-400 text-xs">
-                    {layout.layout?.tables?.length || 0} {t('tables')}
+                    {
+                      // Show live count for default layout using current working layout;
+                      // otherwise, count only real tables (exclude chairs) from saved snapshot
+                      savedLayout.is_default
+                        ? countRealTables(workingLayout)
+                        : countRealTables(savedLayout.layout)
+                    } {t('tables')}
                     </p>
                   </div>
                   <button
-                    onClick={(e) => handleDelete(layout.id, e)}
+                    onClick={(e) => handleDelete(savedLayout.id, e)}
                     className="text-red-400 hover:text-red-300 ml-1 p-0.5 rounded hover:bg-red-500/10 transition-colors flex-shrink-0"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,9 +186,9 @@ const LayoutList: React.FC<LayoutListProps> = ({
                     </svg>
                   </button>
                 </div>
-                {selectedLayoutId === layout.id && (
+                {selectedLayoutId === savedLayout.id && (
                   <button
-                    onClick={() => handleLoad(layout.id)}
+                    onClick={() => handleLoad(savedLayout.id)}
                     className="mt-1.5 w-full bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 py-1 rounded text-xs transition-colors"
                   >
                     {t('loadLayout')}
@@ -180,7 +213,7 @@ const LayoutList: React.FC<LayoutListProps> = ({
         confirmText={t('deleteZoneButton')}
         type="delete"
       />
-    </div>
+    </motion.div>
   );
 };
 
@@ -189,6 +222,17 @@ const SaveLayoutModal: React.FC<{ onClose: () => void; onSave: (name: string, is
   const { t } = useLanguage();
   const [layoutName, setLayoutName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
+
+  // Ensure global state knows a modal is open and prevent background scroll
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('modal-open')); } catch {}
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow || 'unset';
+      try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
+    };
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,7 +243,7 @@ const SaveLayoutModal: React.FC<{ onClose: () => void; onSave: (name: string, is
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black bg-opacity-50 z-[12050] flex items-center justify-center">
       <div className="bg-[#000814] border border-[#1E2A34] rounded-lg p-6 w-96 shadow-2xl">
         <h3 className="text-white font-bold text-xl mb-4">{t('saveLayout')}</h3>
         <form onSubmit={handleSubmit}>
@@ -259,8 +303,8 @@ interface TextElement {
 }
 
 interface CanvasProps {
-  selectedTool: 'select' | 'table' | 'wall' | 'text' | 'delete';
-  onToolChange: (tool: 'select' | 'table' | 'wall' | 'text' | 'delete') => void;
+  selectedTool: 'select' | 'table' | 'wall' | 'text' | 'chair' | 'delete';
+  onToolChange: (tool: 'select' | 'table' | 'wall' | 'text' | 'chair' | 'delete') => void;
   onAddTable: (type: 'rectangle' | 'circle') => void;
   tableType: 'rectangle' | 'circle';
   onUndo: () => void;
@@ -550,7 +594,6 @@ const isWallInSelectionBox = (wall: any, box: any) => {
   // Use precise line-rectangle intersection instead of bounding box
   return doesLineIntersectRect(wall.x1, wall.y1, wall.x2, wall.y2, boxLeft, boxTop, boxRight, boxBottom);
 };
-
 const Canvas: React.FC<CanvasProps> = ({
   selectedTool,
   onToolChange,
@@ -564,8 +607,9 @@ const Canvas: React.FC<CanvasProps> = ({
   selectedDate,
   editReservation
 }) => {
-  const { t } = useLanguage();
-  const { user, isAuthenticated, activeRole } = useContext(UserContext);
+  const { t, currentLanguage } = useLanguage();
+  const { user, isAuthenticated } = useContext(UserContext);
+  const { hasPermission } = useRolePermissions();
   const { currentZone, zones } = useContext(ZoneContext);
   const { 
     layout, 
@@ -590,13 +634,95 @@ const Canvas: React.FC<CanvasProps> = ({
     getDefaultLayout 
   } = useCanvasLayout();
   
+  // Subscribe to theme changes so Canvas (and the top toolbar within it) rerenders immediately
+  const { theme } = useContext(ThemeContext);
+  const isLight = theme === 'light';
+
   const { reservations } = useContext(ReservationContext);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  // Canvas bounds helpers to keep elements within visible area
+  const getCanvasSize = () => {
+    const el = canvasRef.current;
+    const z = getZoom() || 1;
+    return {
+      // Adjust for app zoom (content is scaled by #app-zoom-root.style.zoom)
+      width: el ? (el.clientWidth / z) : 0,
+      height: el ? (el.clientHeight / z) : 0
+    };
+  };
+  const clampX = (x: number, w: number = 0) => {
+    const { width } = getCanvasSize();
+    return Math.max(0, Math.min(x, Math.max(0, width - w)));
+  };
+  const clampY = (y: number, h: number = 0) => {
+    const { height } = getCanvasSize();
+    return Math.max(0, Math.min(y, Math.max(0, height - h)));
+  };
+
+  // On window resize, don't reposition elements; let the canvas clip overflow.
+  // This prevents tables/chairs from being pushed when window gets smaller.
+  useEffect(() => {
+    const onResize = () => {
+      // no-op, but keep hook in case we want to react to size changes later
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (hoverRafRef.current != null) {
+        try { cancelAnimationFrame(hoverRafRef.current); } catch {}
+        hoverRafRef.current = null;
+      }
+    };
+  }, []);
+  // Touch → mouse bridge so existing mouse handlers work on touchscreens
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const dispatchSyntheticMouse = (type: 'mousedown' | 'mousemove' | 'mouseup', t: Touch) => {
+      const target = (document.elementFromPoint(t.clientX, t.clientY) as HTMLElement) || el;
+      const evt = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: t.clientX,
+        clientY: t.clientY,
+        button: 0
+      });
+      target.dispatchEvent(evt);
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        e.preventDefault();
+        dispatchSyntheticMouse('mousedown', e.touches[0]);
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        e.preventDefault();
+        dispatchSyntheticMouse('mousemove', e.touches[0]);
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const t = e.changedTouches && e.changedTouches[0];
+      if (t) {
+        e.preventDefault();
+        dispatchSyntheticMouse('mouseup', t);
+      }
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart as any);
+      el.removeEventListener('touchmove', onTouchMove as any);
+      el.removeEventListener('touchend', onTouchEnd as any);
+    };
+  }, []);
   const dragStartPosition = useRef<{ x: number, y: number } | null>(null);
   const dragThresholdPassed = useRef(false);
   const isDraggingElements = useRef(false);
   const wasElementDragged = useRef(false);
-  const groupScaleInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number } }>({});
+  const groupScaleInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number, fontSize?: number } }>({});
   const groupRotationInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number, rotation: number } }>({});
   
   // Hover state for handles
@@ -624,8 +750,14 @@ const Canvas: React.FC<CanvasProps> = ({
   const [isWaiterPanelOpen, setIsWaiterPanelOpen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [isAnyModalOpen, setIsAnyModalOpen] = useState(false);
+  const [isTimelineOverlayOpen, setIsTimelineOverlayOpen] = useState(false);
+  const prevTimelineCollapsedRef = useRef(false);
   useEffect(() => {
-    const onOpen = () => setIsWaiterPanelOpen(true);
+    const onOpen = () => {
+      setIsWaiterPanelOpen(true);
+      // Auto-close timeline overlay when waiter panel opens
+      setIsTimelineOverlayOpen(false);
+    };
     const onClose = () => setIsWaiterPanelOpen(false);
     window.addEventListener('waiter-open', onOpen as any);
     window.addEventListener('waiter-close', onClose as any);
@@ -641,6 +773,16 @@ const Canvas: React.FC<CanvasProps> = ({
     };
   }, []);
   
+  // Sync timeline collapse with Layouts menu visibility
+  useEffect(() => {
+    if (showLayoutList) {
+      prevTimelineCollapsedRef.current = isTimelineCollapsed;
+      setIsTimelineCollapsed(true);
+    } else {
+      setIsTimelineCollapsed(prevTimelineCollapsedRef.current);
+    }
+  }, [showLayoutList]);
+  
   // Alert modal state
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertConfig, setAlertConfig] = useState({
@@ -648,6 +790,889 @@ const Canvas: React.FC<CanvasProps> = ({
     message: '',
     type: 'error' as 'info' | 'error' | 'success'
   });
+
+  // --- Chair snapping helpers ---
+  const CHAIR_SNAP_DISTANCE = 20; // px
+  const CHAIR_SNAP_GAP = 1;       // px spacing from table edge (very close)
+  const BOOTH_CURVED_THICKNESS_RATIO = 14 / 50; // SVG mask: height=50, t=14
+  const BOOTH_U_THICKNESS_RATIO = 14 / 100;     // SVG mask: size=100, t=14
+
+  // For special chair variants (booths), we want the inner edge to align to table,
+  // not the outer bounding edge. This returns how far inward from the outer edge
+  // the usable inner edge sits (approx), expressed in pixels relative to current size.
+  const getChairVariantInsetPx = (variant: any, chairW: number, chairH: number): number => {
+    const size = Math.min(chairW, chairH);
+    switch (variant) {
+      case 'booth':
+      case 'boothCurved':
+        return size * 0.22; // approx ring thickness for curved booth
+      case 'boothU':
+        return size * 0.20; // U booth wall thickness
+      default:
+        return 0;
+    }
+  };
+
+  const rotatePoint = (px: number, py: number, cx: number, cy: number, rad: number) => {
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const dx = px - cx;
+    const dy = py - cy;
+    return { x: cx + (dx * cos - dy * sin), y: cy + (dx * sin + dy * cos) };
+  };
+
+  const normalize = (vx: number, vy: number) => {
+    const len = Math.sqrt(vx * vx + vy * vy) || 1;
+    return { x: vx / len, y: vy / len };
+  };
+
+  // Recompute chair positions for chairs attached to the given circular tables.
+  // Uses per-seat attachedAngleDeg when available; otherwise derives it from current world pose.
+  // When shouldSnap is true, resulting chair top-left positions are snapped to grid.
+  const glueCircularChairsToParents = (layoutObj: any, circleIds: Set<string>, shouldSnap: boolean): any => {
+    if (!layoutObj) return layoutObj;
+    const tables = Array.isArray(layoutObj.tables) ? layoutObj.tables : [];
+    if (tables.length === 0 || circleIds.size === 0) return layoutObj;
+    const byId = new Map<string, any>();
+    tables.forEach((t: any) => byId.set(t.id, t));
+    const nextTables = tables.map((t: any) => {
+      if (!t || t.type !== 'chair' || !t.attachedToTableId || !circleIds.has(t.attachedToTableId)) return t;
+      const parent = byId.get(t.attachedToTableId);
+      if (!parent) return t;
+      const centerX = (parent.x || 0) + (parent.width || 100) / 2;
+      const centerY = (parent.y || 0) + (parent.height || 100) / 2;
+      const parentRot = normalizeAngle(parent.rotation || 0);
+      const variant = (t as any).chairVariant;
+      // Determine base attached angle in parent's local (0 at +X), degrees
+      let baseAngleDeg: number;
+      if (typeof (t as any).attachedAngleDeg === 'number') {
+        baseAngleDeg = (t as any).attachedAngleDeg;
+      } else {
+        const cx = (t.x || 0) + (t.width || 0) / 2;
+        const cy = (t.y || 0) + (t.height || 0) / 2;
+        const worldAngle = Math.atan2(cy - centerY, cx - centerX) * 180 / Math.PI;
+        baseAngleDeg = normalizeAngle(worldAngle - parentRot);
+      }
+      const angleNowDeg = normalizeAngle(baseAngleDeg + parentRot);
+      const rad = angleNowDeg * Math.PI / 180;
+      const ux = Math.cos(rad);
+      const uy = Math.sin(rad);
+      // Arc booths on circular tables: resize to follow table radius, keep inner edge flush
+      if ('arcInnerRatio' in (t as any) || variant === 'boothCurved' || variant === 'boothU') {
+        // Only special-case circular parents – rectangles still use original size.
+        let width = t.width || GRID_SIZE * 8;
+        let height = t.height || GRID_SIZE * 8;
+        let arcInnerRatio = (t as any).arcInnerRatio;
+        if (parent.type === 'circle') {
+          const tableW = Math.max(1, parent.width || GRID_SIZE * STANDARD_CIRCLE_GRID_CELLS);
+          const r = tableW / 2;
+          const thickness = variant === 'boothU' ? BOOTH_ARC_THICKNESS_U : BOOTH_ARC_THICKNESS_CURVED;
+          const outerR = r + thickness;
+          const outerD = outerR * 2;
+          width = outerD;
+          height = outerD;
+          arcInnerRatio = (r / outerR) * 50;
+        }
+        const rotDeg = normalizeAngle(angleNowDeg + 90);
+        const nx = centerX - width / 2;
+        const ny = centerY - height / 2;
+        return {
+          ...t,
+          width,
+          height,
+          x: shouldSnap ? snapToGrid(nx) : nx,
+          y: shouldSnap ? snapToGrid(ny) : ny,
+          rotation: rotDeg,
+          arcInnerRatio,
+          attachedAngleDeg: baseAngleDeg
+        };
+      }
+      // Standard / barstool: place at radius plus offset and tangent-rotate.
+      // For circular tables, use exact radius from width to follow true circle size.
+      const r = (parent.type === 'circle')
+        ? Math.max(1, (parent.width || 100)) / 2
+        : Math.max(parent.width || 100, parent.height || 100) / 2;
+      const w = t.width || GRID_SIZE * 3;
+      const h = t.height || GRID_SIZE * 3;
+      const inset = getChairVariantInsetPx(variant, w, h);
+      const half = Math.min(w, h) / 2;
+      const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+      const cx = centerX + ux * (r + offset);
+      const cy = centerY + uy * (r + offset);
+      const rotDeg = normalizeAngle(angleNowDeg + 90);
+      const nx = cx - w / 2;
+      const ny = cy - h / 2;
+      return {
+        ...t,
+        x: shouldSnap ? snapToGrid(nx) : nx,
+        y: shouldSnap ? snapToGrid(ny) : ny,
+        rotation: rotDeg,
+        attachedAngleDeg: baseAngleDeg
+      };
+    });
+    return { ...layoutObj, tables: nextTables };
+  };
+
+  // Recompute chair positions for chairs attached to the given RECTANGULAR tables.
+  // Uses per-chair attachedSide ('top'|'right'|'bottom'|'left'|'tl'|'tr'|'br'|'bl') and attachedT (0..1 along side)
+  // plus attachedOffsetPx (outward offset from table edge). When metadata is missing, callers should run
+  // ensureAttachedAngles (which also infers rectangle attachments) before calling this function.
+  const glueRectChairsToParents = (layoutObj: any, rectIds: Set<string>, shouldSnap: boolean): any => {
+    if (!layoutObj) return layoutObj;
+    const tables = Array.isArray(layoutObj.tables) ? layoutObj.tables : [];
+    if (tables.length === 0 || rectIds.size === 0) return layoutObj;
+    const byId = new Map<string, any>();
+    tables.forEach((t: any) => byId.set(t.id, t));
+    const nextTables = tables.map((t: any) => {
+      if (!t || t.type !== 'chair' || !t.attachedToTableId || !rectIds.has(t.attachedToTableId)) return t;
+      const parent = byId.get(t.attachedToTableId);
+      if (!parent || parent.type === 'circle') return t;
+      // Parent geometry
+      const w = Math.max(1, parent.width || GRID_SIZE * 6);
+      const h = Math.max(1, parent.height || GRID_SIZE * 4);
+      const cx = parent.x + w / 2;
+      const cy = parent.y + h / 2;
+      const halfW = w / 2;
+      const halfH = h / 2;
+      const rot = (parent.rotation || 0) * Math.PI / 180;
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+      // Metadata
+      const side: any = (t as any).attachedSide || 'top';
+      const tt: number = typeof (t as any).attachedT === 'number' ? Math.max(0, Math.min(1, (t as any).attachedT)) : 0.5;
+      const variant = (t as any).chairVariant;
+      const chairW = t.width || GRID_SIZE * 3;
+      const chairH = t.height || GRID_SIZE * 1;
+      const inset = getChairVariantInsetPx(variant, chairW, chairH);
+      const half = Math.min(chairW, chairH) / 2;
+      const baseOffset = (variant === 'boothU') ? 0 : Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+      const customOff = Math.max(0, Number((t as any).attachedOffsetPx) || 0);
+      const out = Math.max(baseOffset, customOff);
+      // Local position on side/corner
+      let lx = 0, ly = 0, nx = 0, ny = 0;
+      switch (side) {
+        case 'top':    lx = -halfW + tt * (2 * halfW); ly = -halfH; nx = 0; ny = -1; break;
+        case 'bottom': lx = -halfW + tt * (2 * halfW); ly = +halfH; nx = 0; ny = +1; break;
+        case 'left':   lx = -halfW; ly = -halfH + tt * (2 * halfH); nx = -1; ny = 0; break;
+        case 'right':  lx = +halfW; ly = -halfH + tt * (2 * halfH); nx = +1; ny = 0; break;
+        case 'tl':     lx = -halfW; ly = -halfH; nx = -1; ny = -1; break;
+        case 'tr':     lx = +halfW; ly = -halfH; nx = +1; ny = -1; break;
+        case 'br':     lx = +halfW; ly = +halfH; nx = +1; ny = +1; break;
+        case 'bl':     lx = -halfW; ly = +halfH; nx = -1; ny = +1; break;
+      }
+      // Special placement for U-separé on rectangles: center is ±wall/2 from table center, not at the edge.
+      if (variant === 'boothU' && (side === 'top' || side === 'bottom') && parent.type !== 'circle') {
+        const wall = (t as any).boothThickness || RECT_U_WALL_PX;
+        // Recompute U size from parent table so it always hugs the table on resize
+        const sepW = w + wall * 2;
+        const sepH = h + wall;
+        const sign = side === 'top' ? -1 : 1;
+        const localDx = 0;
+        const localDy = sign * (wall / 2); // center offset so inner dno U je zalepljeno na ivicu stola
+        const wx2 = cx + (localDx * Math.cos(rot) - localDy * Math.sin(rot));
+        const wy2 = cy + (localDx * Math.sin(rot) + localDy * Math.cos(rot));
+        const rotDeg2 = normalizeAngle((side === 'top' ? 0 : 180) + (parent.rotation || 0));
+        const nxTopLeftX2 = wx2 - sepW / 2;
+        const nxTopLeftY2 = wy2 - sepH / 2;
+        return {
+          ...t,
+          x: shouldSnap ? snapToGrid(nxTopLeftX2) : nxTopLeftX2,
+          y: shouldSnap ? snapToGrid(nxTopLeftY2) : nxTopLeftY2,
+          width: sepW,
+          height: sepH,
+          rotation: rotDeg2,
+          attachedSide: side,
+          attachedT: 0.5,
+          attachedOffsetPx: 0,
+          boothThickness: wall
+        };
+      }
+      // Normalize corner normal
+      const nlen = Math.hypot(nx, ny) || 1;
+      nx /= nlen; ny /= nlen;
+      // Rotate to world
+      const wx = cx + (lx * cos - ly * sin);
+      const wy = cy + (lx * sin + ly * cos);
+      // Outward offset in world space
+      const offX = out * (nx * cos - ny * sin);
+      const offY = out * (nx * sin + ny * cos);
+      const ccx = wx + offX;
+      const ccy = wy + offY;
+      const rotDeg = normalizeAngle((Math.atan2(ny, nx) * 180 / Math.PI) + 90 + (parent.rotation || 0));
+      const nxTopLeftX = ccx - chairW / 2;
+      const nxTopLeftY = ccy - chairH / 2;
+      return {
+        ...t,
+        x: shouldSnap ? snapToGrid(nxTopLeftX) : nxTopLeftX,
+        y: shouldSnap ? snapToGrid(nxTopLeftY) : nxTopLeftY,
+        rotation: rotDeg,
+        attachedSide: side,
+        attachedT: tt,
+        attachedOffsetPx: out
+      };
+    });
+    return { ...layoutObj, tables: nextTables };
+  };
+
+  // Ensure all chairs attached to circular tables have a persisted 'attachedAngleDeg' relative to the parent.
+  // This prevents chairs from "slipping" during rotation/resize when their position hasn't been updated yet.
+  const ensureAttachedAngles = (layoutObj: any): any => {
+    if (!layoutObj || !Array.isArray(layoutObj.tables)) return layoutObj;
+    let changed = false;
+    const byId = new Map<string, any>();
+    layoutObj.tables.forEach((t: any) => byId.set(t.id, t));
+    
+    const nextTables = layoutObj.tables.map((t: any) => {
+      if (t && t.type === 'chair' && t.attachedToTableId && typeof t.attachedAngleDeg !== 'number') {
+        const parent = byId.get(t.attachedToTableId);
+        if (parent && parent.type === 'circle') {
+          const parentRot = normalizeAngle(parent.rotation || 0);
+          const parentCenterX = (parent.x || 0) + (parent.width || 100) / 2;
+          const parentCenterY = (parent.y || 0) + (parent.height || 100) / 2;
+          const chairCenterX = (t.x || 0) + (t.width || 0) / 2;
+          const chairCenterY = (t.y || 0) + (t.height || 0) / 2;
+          const worldAngle = Math.atan2(chairCenterY - parentCenterY, chairCenterX - parentCenterX) * 180 / Math.PI;
+          const baseAngle = normalizeAngle(worldAngle - parentRot);
+          changed = true;
+          return { ...t, attachedAngleDeg: baseAngle };
+        }
+      }
+      // Infer rectangular attachment (side, t position and outward offset)
+      if (t && t.type === 'chair' && t.attachedToTableId && typeof (t as any).attachedSide !== 'string') {
+        const parent = byId.get(t.attachedToTableId);
+        if (parent && parent.type !== 'circle') {
+          const w = Math.max(1, parent.width || GRID_SIZE * 6);
+          const h = Math.max(1, parent.height || GRID_SIZE * 4);
+          const cx = parent.x + w / 2;
+          const cy = parent.y + h / 2;
+          const halfW = w / 2;
+          const halfH = h / 2;
+          const rot = -((parent.rotation || 0) * Math.PI / 180); // inverse
+          const chairCx = (t.x || 0) + (t.width || 0) / 2;
+          const chairCy = (t.y || 0) + (t.height || 0) / 2;
+          // Convert chair center to parent's local
+          const dx = chairCx - cx;
+          const dy = chairCy - cy;
+          const lx = dx * Math.cos(rot) - dy * Math.sin(rot);
+          const ly = dx * Math.sin(rot) + dy * Math.cos(rot);
+          // Decide nearest side
+          const dTop = Math.abs(ly + halfH);
+          const dBottom = Math.abs(ly - halfH);
+          const dLeft = Math.abs(lx + halfW);
+          const dRight = Math.abs(lx - halfW);
+          let side: any = 'top';
+          let tpos = 0.5;
+          let off = 0;
+          if (dTop <= dBottom && dTop <= dLeft && dTop <= dRight) { side = 'top'; tpos = (lx + halfW) / (2 * halfW); off = Math.max(0, - (ly + halfH)); }
+          else if (dBottom <= dLeft && dBottom <= dRight) { side = 'bottom'; tpos = (lx + halfW) / (2 * halfW); off = Math.max(0, ly - halfH); }
+          else if (dLeft <= dRight) { side = 'left'; tpos = (ly + halfH) / (2 * halfH); off = Math.max(0, - (lx + halfW)); }
+          else { side = 'right'; tpos = (ly + halfH) / (2 * halfH); off = Math.max(0, lx - halfW); }
+          const clampedT = Math.max(0, Math.min(1, isFinite(tpos) ? tpos : 0.5));
+          changed = true;
+          return { ...t, attachedSide: side, attachedT: clampedT, attachedOffsetPx: off };
+        }
+      }
+      return t;
+    });
+    
+    if (!changed) return layoutObj;
+    return { ...layoutObj, tables: nextTables };
+  };
+
+  // Build snap candidates (points with outward normals) for a single table
+  const getSnapCandidatesForTable = (t: any): Array<{ x: number; y: number; nx: number; ny: number }> => {
+    if (!t || t.type === 'chair') return [];
+    const rotation = (t.rotation || 0) * Math.PI / 180;
+    const w = Math.max(1, t.width || GRID_SIZE * 6);
+    const h = Math.max(1, t.height || GRID_SIZE * 4);
+    const cx = t.x + w / 2;
+    const cy = t.y + h / 2;
+    const candidates: Array<{ x: number; y: number; nx: number; ny: number }> = [];
+    if (t.type === 'circle') {
+      // Use exact circle radius from width to follow true table size
+      const r = Math.max(1, w) / 2;
+      const guides = t.chairGuides || {};
+      const count = Math.max(0, Math.min(64, Number(guides.circleCount) || 0));
+      if (count > 0) {
+        const startDeg = ((Number(guides.circleStartDeg) || 0) % 360 + 360) % 360;
+        for (let i = 0; i < count; i++) {
+          const angleDeg = startDeg + (360 * i / count);
+          const a = angleDeg * Math.PI / 180;
+          const ux = Math.cos(a);
+          const uy = Math.sin(a);
+          const px = cx + ux * r;
+          const py = cy + uy * r;
+          const n = normalize(ux, uy);
+          candidates.push({ x: px, y: py, nx: n.x, ny: n.y });
+        }
+      } else {
+        // Fallback: 8 evenly distributed points
+        const angles = [0, 45, 90, 135, 180, 225, 270, 315].map(a => a * Math.PI / 180);
+        for (const a of angles) {
+          const ux = Math.cos(a);
+          const uy = Math.sin(a);
+          const px = cx + ux * r;
+          const py = cy + uy * r;
+          const n = normalize(ux, uy);
+          candidates.push({ x: px, y: py, nx: n.x, ny: n.y });
+        }
+      }
+    } else {
+      // Rectangle: compute corners and side midpoints in local space then rotate
+      const halfW = w / 2;
+      const halfH = h / 2;
+      // Local points
+      const localCorners = [
+        { x: +halfW, y: +halfH, nx: +1, ny: +1 },   // br
+        { x: -halfW, y: +halfH, nx: -1, ny: +1 },   // bl
+        { x: +halfW, y: -halfH, nx: +1, ny: -1 },   // tr
+        { x: -halfW, y: -halfH, nx: -1, ny: -1 }    // tl
+      ];
+      const localMids = [
+        { x: 0,       y: -halfH, nx: 0,  ny: -1 },  // top mid
+        { x: 0,       y: +halfH, nx: 0,  ny: +1 },  // bottom mid
+        { x: -halfW,  y: 0,      nx: -1, ny: 0  },  // left mid
+        { x: +halfW,  y: 0,      nx: +1, ny: 0  }   // right mid
+      ];
+      const transform = (p: { x: number; y: number; nx: number; ny: number }) => {
+        const pr = rotatePoint(cx + p.x, cy + p.y, cx, cy, rotation);
+        const nr = rotatePoint(cx + p.nx, cy + p.ny, cx, cy, rotation);
+        const n = normalize(nr.x - cx, nr.y - cy);
+        return { x: pr.x, y: pr.y, nx: n.x, ny: n.y };
+      };
+      // Keep default midpoints for generic snapping
+      localMids.forEach(p => candidates.push(transform(p)));
+      
+      // Add user-defined chair guides (discrete snap points per side)
+      const guides = t.chairGuides || {};
+      const addSidePoints = (side: 'top' | 'right' | 'bottom' | 'left', count?: number) => {
+        const n = Math.max(0, Math.min(32, Number(count) || 0)); // clamp reasonable
+        if (n <= 0) return;
+        for (let i = 1; i <= n; i++) {
+          const frac = i / (n + 1); // evenly spaced, avoid corners
+          let px = 0, py = 0, nx = 0, ny = 0;
+          switch (side) {
+            case 'top':
+              px = -halfW + frac * (2 * halfW);
+              py = -halfH;
+              nx = 0; ny = -1;
+              break;
+            case 'bottom':
+              px = -halfW + frac * (2 * halfW);
+              py = +halfH;
+              nx = 0; ny = +1;
+              break;
+            case 'left':
+              px = -halfW;
+              py = -halfH + frac * (2 * halfH);
+              nx = -1; ny = 0;
+              break;
+            case 'right':
+              px = +halfW;
+              py = -halfH + frac * (2 * halfH);
+              nx = +1; ny = 0;
+              break;
+          }
+          const pr = rotatePoint(cx + px, cy + py, cx, cy, rotation);
+          const nr = rotatePoint(cx + nx, cy + ny, cx, cy, rotation);
+          const nrm = normalize(nr.x - cx, nr.y - cy);
+          candidates.push({ x: pr.x, y: pr.y, nx: nrm.x, ny: nrm.y });
+        }
+      };
+      addSidePoints('top', guides.top);
+      addSidePoints('right', guides.right);
+      addSidePoints('bottom', guides.bottom);
+      addSidePoints('left', guides.left);
+      
+      // Optional corner seats if enabled per corner
+      const addCornerPoint = (cornerKey: 'tl' | 'tr' | 'br' | 'bl', enabled?: boolean) => {
+        if (!enabled) return;
+        let p;
+        switch (cornerKey) {
+          case 'br': p = localCorners[0]; break;
+          case 'bl': p = localCorners[1]; break;
+          case 'tr': p = localCorners[2]; break;
+          case 'tl': p = localCorners[3]; break;
+        }
+        if (!p) return;
+        const pr = rotatePoint(cx + p.x, cy + p.y, cx, cy, rotation);
+        const nr = rotatePoint(cx + p.nx, cy + p.ny, cx, cy, rotation);
+        const nrm = normalize(nr.x - cx, nr.y - cy);
+        candidates.push({ x: pr.x, y: pr.y, nx: nrm.x, ny: nrm.y });
+      };
+      addCornerPoint('tl', !!guides.cornerTL);
+      addCornerPoint('tr', !!guides.cornerTR);
+      addCornerPoint('br', !!guides.cornerBR);
+      addCornerPoint('bl', !!guides.cornerBL);
+    }
+    return candidates;
+  };
+
+  const getAllSnapCandidates = (): Array<any> => {
+    const list: Array<any> = [];
+    (layout.tables || []).forEach(t => {
+      if (t && t.type !== 'chair') {
+        list.push(...getSnapCandidatesForTable(t));
+        // Add center candidate for booth-style snapping
+        const w = Math.max(1, t.width || GRID_SIZE * 6);
+        const h = Math.max(1, t.height || GRID_SIZE * 4);
+        const cx = t.x + w / 2;
+        const cy = t.y + h / 2;
+        list.push({ x: cx, y: cy, nx: 0, ny: 0, kind: 'center' });
+      }
+    });
+    return list;
+  };
+
+  const getSnappedChairTopLeft = (proposedX: number, proposedY: number, chairW: number, chairH: number, variant?: any, rotationDeg?: number): { x: number; y: number; snapped: boolean } => {
+    const cx = proposedX + chairW / 2;
+    const cy = proposedY + chairH / 2;
+    const candidates = getAllSnapCandidates();
+    let bestEdge: null | { x: number; y: number; nx: number; ny: number; d: number } = null;
+    let bestCenter: null | { x: number; y: number; d: number } = null;
+    for (const p of candidates as any[]) {
+      const dx = cx - p.x;
+      const dy = cy - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= CHAIR_SNAP_DISTANCE) {
+        if (p.kind === 'center') {
+          if (!bestCenter || dist < bestCenter.d) bestCenter = { x: p.x, y: p.y, d: dist };
+        } else {
+          if (!bestEdge || dist < bestEdge.d) bestEdge = { x: p.x, y: p.y, nx: p.nx, ny: p.ny, d: dist };
+        }
+      }
+    }
+    // Prefer center-based snapping for booth variants when available
+    const isBooth = variant === 'booth' || variant === 'boothCurved' || variant === 'boothU';
+    if (isBooth && bestCenter) {
+      return { x: bestCenter.x - chairW / 2, y: bestCenter.y - chairH / 2, snapped: true };
+    }
+    const best = bestEdge;
+    if (!best) {
+      return { x: proposedX, y: proposedY, snapped: false };
+    }
+    // Use variant-aware geometry so that the actual vector edge of the booth sits on the snap point
+    const theta = ((rotationDeg || 0) % 360) * Math.PI / 180;
+    let snappedCenterX = cx;
+    let snappedCenterY = cy;
+    if (variant === 'booth' || variant === 'boothCurved') {
+      // Semi-circular: inner arc center is at bottom-center in local coords (w/2, h)
+      const R = chairH; // outer radius equals element height
+      const thickness = R * BOOTH_CURVED_THICKNESS_RATIO;
+      const rInner = Math.max(0, R - thickness);
+      const gap = 0;
+      const arcCenterX = best.x - best.nx * (rInner + gap);
+      const arcCenterY = best.y - best.ny * (rInner + gap);
+      // Vector from box center to arc center: (0, h/2) in local coords
+      const vLocalX = 0;
+      const vLocalY = chairH / 2;
+      const vWorldX = vLocalX * Math.cos(theta) - vLocalY * Math.sin(theta);
+      const vWorldY = vLocalX * Math.sin(theta) + vLocalY * Math.cos(theta);
+      const boxCenterX = arcCenterX - vWorldX;
+      const boxCenterY = arcCenterY - vWorldY;
+      snappedCenterX = boxCenterX;
+      snappedCenterY = boxCenterY;
+    } else if (variant === 'boothU') {
+      // U-booth: treat inner boundary as a local-axis aligned rectangle inset by thickness
+      const halfW = chairW / 2;
+      const halfH = chairH / 2;
+      const tW = chairW * BOOTH_U_THICKNESS_RATIO;
+      const tH = chairH * BOOTH_U_THICKNESS_RATIO;
+      // Transform the table normal into local chair axes
+      const cosT = Math.cos(-theta);
+      const sinT = Math.sin(-theta);
+      const nxLocal = best.nx * cosT - best.ny * sinT;
+      const nyLocal = best.nx * sinT + best.ny * cosT;
+      const ox = Math.max(0, halfW - tW);
+      const oy = Math.max(0, halfH - tH);
+      // Magnitude from center to inner edge along that local normal
+      const magnitude = Math.sqrt((Math.abs(nxLocal) * ox) ** 2 + (Math.abs(nyLocal) * oy) ** 2);
+      const gap = 0;
+      snappedCenterX = best.x + best.nx * (gap + magnitude);
+      snappedCenterY = best.y + best.ny * (gap + magnitude);
+    } else {
+      // Standard & barstool: keep prior logic (inner edge at small gap)
+    const half = Math.min(chairW, chairH) / 2;
+      const inset = getChairVariantInsetPx(variant, chairW, chairH);
+      const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+      snappedCenterX = best.x + best.nx * offset;
+      snappedCenterY = best.y + best.ny * offset;
+    }
+    return { x: snappedCenterX - chairW / 2, y: snappedCenterY - chairH / 2, snapped: true };
+  };
+
+  // --- Auto-generate chairs from guides ---
+  const getDefaultAutoChairSize = (variant: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU', orientation: 'horizontal' | 'vertical' | 'square') => {
+    switch (variant) {
+      case 'barstool':
+        return { w: GRID_SIZE * 3, h: GRID_SIZE * 3 };
+      case 'boothCurved': {
+        const h = GRID_SIZE * 8;
+        return { w: GRID_SIZE * 16, h };
+      }
+      case 'boothU': {
+        const s = GRID_SIZE * 12;
+        return { w: s, h: s };
+      }
+      default: {
+        // Standard chair: always 3x1; rotation will align width with edge/corner tangent
+        return { w: GRID_SIZE * 3, h: GRID_SIZE * 1 };
+      }
+    }
+  };
+
+  const buildGuidePointsWithLabels = (t: any): Array<{ x: number; y: number; nx: number; ny: number; label: 'top' | 'right' | 'bottom' | 'left' | 'tl' | 'tr' | 'br' | 'bl' | 'circle' }> => {
+    if (!t || t.type === 'chair') return [];
+    const rotation = (t.rotation || 0) * Math.PI / 180;
+    const w = Math.max(1, t.width || GRID_SIZE * 6);
+    const h = Math.max(1, t.height || GRID_SIZE * 4);
+    const cx = t.x + w / 2;
+    const cy = t.y + h / 2;
+    const out: Array<{ x: number; y: number; nx: number; ny: number; label: any }> = [];
+    if (t.type === 'circle') {
+      // Use exact circle radius from width to match true table size
+      const r = Math.max(1, w) / 2;
+      const guides = t.chairGuides || {};
+      const count = Math.max(0, Math.min(64, Number(guides.circleCount) || 0));
+      const startDeg = ((Number(guides.circleStartDeg) || 0) % 360 + 360) % 360;
+      if (count > 0) {
+        for (let i = 0; i < count; i++) {
+          const angleDeg = startDeg + (360 * i / count);
+          const a = angleDeg * Math.PI / 180;
+          const ux = Math.cos(a);
+          const uy = Math.sin(a);
+          const px = cx + ux * r;
+          const py = cy + uy * r;
+          const n = normalize(ux, uy);
+          out.push({ x: px, y: py, nx: n.x, ny: n.y, label: 'circle' });
+        }
+      }
+      return out;
+    }
+    const halfW = w / 2;
+    const halfH = h / 2;
+    const guides = t.chairGuides || {};
+    const transform = (p: { x: number; y: number; nx: number; ny: number }) => {
+      const pr = rotatePoint(cx + p.x, cy + p.y, cx, cy, rotation);
+      const nr = rotatePoint(cx + p.nx, cy + p.ny, cx, cy, rotation);
+      const n = normalize(nr.x - cx, nr.y - cy);
+      return { x: pr.x, y: pr.y, nx: n.x, ny: n.y };
+    };
+    // Sides
+    const addSidePoints = (side: 'top' | 'right' | 'bottom' | 'left', count?: number) => {
+      const n = Math.max(0, Math.min(32, Number(count) || 0));
+      for (let i = 1; i <= n; i++) {
+        let frac = i / (n + 1);
+        // Slightly spread chairs to increase gaps between them (keep small margins to edges)
+        if (n >= 2) {
+          const SIDE_SPREAD = 1.12; // ~12% further from center -> bigger gaps
+          frac = 0.5 + (frac - 0.5) * SIDE_SPREAD;
+          frac = Math.max(0.08, Math.min(0.92, frac));
+        }
+        let p = { x: 0, y: 0, nx: 0, ny: 0 };
+        switch (side) {
+          case 'top':    p = { x: -halfW + frac * (2 * halfW), y: -halfH, nx: 0, ny: -1 }; break;
+          case 'bottom': p = { x: -halfW + frac * (2 * halfW), y: +halfH, nx: 0, ny: +1 }; break;
+          case 'left':   p = { x: -halfW, y: -halfH + frac * (2 * halfH), nx: -1, ny: 0 }; break;
+          case 'right':  p = { x: +halfW, y: -halfH + frac * (2 * halfH), nx: +1, ny: 0 }; break;
+        }
+        const tr = transform(p);
+        out.push({ ...tr, label: side });
+      }
+    };
+    addSidePoints('top', guides.top);
+    addSidePoints('right', guides.right);
+    addSidePoints('bottom', guides.bottom);
+    addSidePoints('left', guides.left);
+    // Corners
+    const addCorner = (key: 'tl' | 'tr' | 'br' | 'bl', enabled?: boolean) => {
+      if (!enabled) return;
+      let p;
+      switch (key) {
+        case 'br': p = { x: +halfW, y: +halfH, nx: +1, ny: +1 }; break;
+        case 'bl': p = { x: -halfW, y: +halfH, nx: -1, ny: +1 }; break;
+        case 'tr': p = { x: +halfW, y: -halfH, nx: +1, ny: -1 }; break;
+        case 'tl': p = { x: -halfW, y: -halfH, nx: -1, ny: -1 }; break;
+      }
+      if (!p) return;
+      const tr = transform(p as any);
+      out.push({ ...tr, label: key });
+    };
+    addCorner('tl', !!guides.cornerTL);
+    addCorner('tr', !!guides.cornerTR);
+    addCorner('br', !!guides.cornerBR);
+    addCorner('bl', !!guides.cornerBL);
+    return out;
+  };
+
+  const autoGenerateChairsForTable = (baseLayout: any, tableId: string): any => {
+    const currentTables = Array.isArray(baseLayout?.tables) ? baseLayout.tables : [];
+    const table = currentTables.find((t: any) => t.id === tableId && t.type !== 'chair');
+    if (!table) return baseLayout;
+    const guides = table.chairGuides || {};
+    // Remove previously attached chairs for this table
+    const kept = currentTables.filter((t: any) => !(t.type === 'chair' && (t as any).attachedToTableId === table.id));
+    // Special handling for circular tables to support per-seat variants
+    if (table.type === 'circle') {
+      const toAdd: any[] = [];
+      const w = Math.max(1, table.width || GRID_SIZE * 8);
+      const h = Math.max(1, table.height || GRID_SIZE * 8);
+      const cx = table.x + w / 2;
+      const cy = table.y + h / 2;
+      const r = Math.max(w, h) / 2;
+      const chairWidthOverride = Number.isFinite(guides.chairWidthPx) ? Math.max(4, Number(guides.chairWidthPx)) : undefined;
+      const chairHeightOverride = Number.isFinite(guides.chairHeightPx) ? Math.max(4, Number(guides.chairHeightPx)) : undefined;
+      const count = Math.max(0, Math.min(64, Number(guides.circleCount) || 0));
+      const startDeg = ((Number(guides.circleStartDeg) || 0) % 360 + 360) % 360;
+      const perSeatVariants: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'> =
+        Array.from({ length: count }, (_, i) => (guides.circleVariants?.[i] || guides.circleVariant || 'standard'));
+      if (count > 0) {
+        for (let i = 0; i < count; i++) {
+          const variant = perSeatVariants[i];
+          const angleDeg = startDeg + (360 * i / count);
+          const a = angleDeg * Math.PI / 180;
+          if (variant === 'boothCurved' || variant === 'boothU') {
+            // Render as an arc centered on the table center so the inner edge is flush with the circle
+            const thickness = variant === 'boothCurved' ? BOOTH_ARC_THICKNESS_CURVED : BOOTH_ARC_THICKNESS_U;
+            const outerR = r + thickness;
+            const outerD = outerR * 2;
+            const innerRatio = (r / outerR) * 50; // viewBox units for inner arc radius
+            const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+            toAdd.push({
+              id: `chair-${table.id}-${Date.now()}-${i}`,
+              number: 0,
+              name: '',
+              seats: 1,
+              x: clampX(cx - outerD / 2, outerD),
+              y: clampY(cy - outerD / 2, outerD),
+              width: outerD,
+              height: outerD,
+              type: 'chair' as const,
+              chairVariant: variant as any,
+              rotation: rotationDeg,
+              color: '#CBD5E1',
+              status: 'available' as const,
+              attachedToTableId: table.id,
+              attachedAngleDeg: angleDeg,
+              arcInnerRatio: innerRatio // for rendering an exact arc in the chair component
+            });
+          } else {
+            const baseSize = getDefaultAutoChairSize(variant as any, 'horizontal');
+            const size = {
+              w: chairWidthOverride ?? baseSize.w,
+              h: chairHeightOverride ?? baseSize.h
+            };
+            const inset = getChairVariantInsetPx(variant, size.w, size.h);
+            const half = Math.min(size.w, size.h) / 2;
+            const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+            const centerX = cx + Math.cos(a) * (r + offset);
+            const centerY = cy + Math.sin(a) * (r + offset);
+            const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+            toAdd.push({
+              id: `chair-${table.id}-${Date.now()}-${i}`,
+              number: 0,
+              name: '',
+              seats: 1,
+              x: clampX(centerX - size.w / 2, size.w),
+              y: clampY(centerY - size.h / 2, size.h),
+              width: size.w,
+              height: size.h,
+              type: 'chair' as const,
+              chairVariant: variant as any,
+              rotation: rotationDeg,
+              color: '#CBD5E1',
+              status: 'available' as const,
+              attachedToTableId: table.id,
+              attachedAngleDeg: angleDeg
+            });
+          }
+        }
+      }
+      return {
+        ...baseLayout,
+        tables: [...kept, ...toAdd]
+      };
+    }
+    // Rectangle: compute positions per-side with optional spacing and per-seat size overrides
+    const toAdd: any[] = [];
+    const w = Math.max(1, table.width || GRID_SIZE * 6);
+    const h = Math.max(1, table.height || GRID_SIZE * 4);
+    const cx = table.x + w / 2;
+    const cy = table.y + h / 2;
+    const halfW = w / 2;
+    const halfH = h / 2;
+    const rot = (table.rotation || 0) * Math.PI / 180;
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const chairWidthOverride = Number.isFinite(guides.chairWidthPx) ? Math.max(4, Number(guides.chairWidthPx)) : undefined;
+    const chairHeightOverride = Number.isFinite(guides.chairHeightPx) ? Math.max(4, Number(guides.chairHeightPx)) : undefined;
+    const spacingPx = Number.isFinite(guides.chairSpacingPx) ? Math.max(0, Number(guides.chairSpacingPx)) : 0;
+    const pushChair = (lx: number, ly: number, nx: number, ny: number, variant: any, orient: 'horizontal'|'vertical'|'square', sideLabel: string, tNorm: number, key: string, sizeOv?: { w?: number; h?: number }) => {
+      const baseSize = getDefaultAutoChairSize(variant as any, orient);
+      const size = {
+        w: baseSize.w,
+        h: baseSize.h
+      };
+      if (variant === 'boothCurved' || variant === 'boothU') {
+        if (sizeOv?.w != null) size.w = sizeOv.w;
+        if (sizeOv?.h != null) size.h = sizeOv.h;
+      } else {
+        if (sizeOv?. w != null) {
+          size.w = Math.max(4, sizeOv.w);
+        } else if (chairWidthOverride != null) {
+          size.w = chairWidthOverride;
+        }
+        if (sizeOv?. h != null) {
+          size.h = Math.max(4, sizeOv.h);
+        } else if (chairHeightOverride != null) {
+          size.h = chairHeightOverride;
+        }
+      }
+      // Bar stool chairs should always be square so they render as perfect circles
+      if (variant === 'barstool') {
+        const side = Math.max(size.w, size.h);
+        size.w = side;
+        size.h = side;
+      }
+      const inset = getChairVariantInsetPx(variant, size.w, size.h);
+      const half = Math.min(size.w, size.h) / 2;
+      const baseOffset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+      const isCorner = sideLabel === 'tl' || sideLabel === 'tr' || sideLabel === 'br' || sideLabel === 'bl';
+      // For corner chairs, pull them closer to the table so they visually "hug" the corner
+      const offset = isCorner ? baseOffset * 0.55 : baseOffset;
+      // local -> world
+      const wx = cx + (lx * cos - ly * sin);
+      const wy = cy + (lx * sin + ly * cos);
+      const wxn = offset * (nx * cos - ny * sin);
+      const wyn = offset * (nx * sin + ny * cos);
+      const ccx = wx + wxn;
+      const ccy = wy + wyn;
+      const rotationDeg = ((Math.atan2(ny, nx) * 180 / Math.PI) + 90 + (table.rotation || 0) + 360) % 360;
+      toAdd.push({
+        id: `chair-${table.id}-${Date.now()}-${key}`,
+        number: 0,
+        name: '',
+        seats: 1,
+        x: clampX(ccx - size.w / 2, size.w),
+        y: clampY(ccy - size.h / 2, size.h),
+        width: size.w,
+        height: size.h,
+        type: 'chair' as const,
+        chairVariant: variant as any,
+        rotation: rotationDeg,
+        color: '#CBD5E1',
+        status: 'available' as const,
+        attachedToTableId: table.id,
+        attachedSide: sideLabel,
+        attachedT: tNorm,
+        attachedOffsetPx: offset
+      });
+    };
+    const sides: Array<{side:'top'|'right'|'bottom'|'left'; count:number; variant:any; orient:'horizontal'|'vertical'}> = [
+      { side: 'top', count: Math.max(0, Number(guides.top) || 0), variant: guides.topVariant || 'standard', orient: 'horizontal' },
+      { side: 'right', count: Math.max(0, Number(guides.right) || 0), variant: guides.rightVariant || 'standard', orient: 'vertical' },
+      { side: 'bottom', count: Math.max(0, Number(guides.bottom) || 0), variant: guides.bottomVariant || 'standard', orient: 'horizontal' },
+      { side: 'left', count: Math.max(0, Number(guides.left) || 0), variant: guides.leftVariant || 'standard', orient: 'vertical' },
+    ];
+    sides.forEach(({ side, count, variant, orient }) => {
+      if (count <= 0) return;
+      const perSeatSizes: Array<{ w?: number; h?: number }> | undefined =
+        (side === 'top' ? (guides as any).topSeatSizes
+          : side === 'right' ? (guides as any).rightSeatSizes
+          : side === 'bottom' ? (guides as any).bottomSeatSizes
+          : (guides as any).leftSeatSizes) || undefined;
+      if (side === 'top' || side === 'bottom') {
+        const length = 2 * halfW;
+        const step = (length - spacingPx * Math.max(0, count - 1)) / (count + 1);
+        // Special handling for U-shaped separé on top/bottom: wrap whole table, not per-seat placement
+        if (variant === 'boothU' && table.type !== 'circle') {
+          // Only one U-separé per side makes sense; ignore extra counts
+          const wall = RECT_U_WALL_PX;
+          const sepW = w + wall * 2;
+          const sepH = h + wall;
+          const rotDeg = table.rotation || 0;
+          const rotRad = rotDeg * Math.PI / 180;
+          const cxWorld = cx;
+          const cyWorld = cy;
+          // Desired: inner bottom of U is flush with table top (Top) / inner top flush with table bottom (Bottom).
+          // This is achieved by placing U-center at ±wall/2 along table's local Y axis.
+          const sign = side === 'top' ? -1 : 1;
+          const localDx = 0;
+          const localDy = sign * (wall / 2);
+          const offX = localDx * Math.cos(rotRad) - localDy * Math.sin(rotRad);
+          const offY = localDx * Math.sin(rotRad) + localDy * Math.cos(rotRad);
+          const sepCenterX = cxWorld + offX;
+          const sepCenterY = cyWorld + offY;
+          const nx = sepCenterX - sepW / 2;
+          const ny = sepCenterY - sepH / 2;
+          toAdd.push({
+            id: `chair-${table.id}-${Date.now()}-${side}-u`,
+            number: 0,
+            name: '',
+            seats: 1,
+            x: clampX(nx, sepW),
+            y: clampY(ny, sepH),
+            width: sepW,
+            height: sepH,
+            type: 'chair' as const,
+            chairVariant: variant as any,
+            rotation: rotDeg,
+            color: '#CBD5E1',
+            status: 'available' as const,
+            attachedToTableId: table.id,
+            attachedSide: side,
+            attachedT: 0.5,
+            attachedOffsetPx: 0,
+            boothThickness: wall
+          });
+        } else {
+          for (let i = 1; i <= count; i++) {
+            const lx = -halfW + step * i + spacingPx * (i - 1);
+            const ly = side === 'top' ? -halfH : +halfH;
+            const tNorm = (lx + halfW) / (2 * halfW);
+            const nx = 0, ny = side === 'top' ? -1 : +1;
+            let sz = perSeatSizes && perSeatSizes[i - 1] ? perSeatSizes[i - 1] : undefined;
+            pushChair(lx, ly, nx, ny, variant, 'horizontal', side, tNorm, `${side}-${i}`, sz);
+          }
+        }
+      } else {
+        const length = 2 * halfH;
+        const step = (length - spacingPx * Math.max(0, count - 1)) / (count + 1);
+        for (let i = 1; i <= count; i++) {
+          const ly = -halfH + step * i + spacingPx * (i - 1);
+          const lx = side === 'left' ? -halfW : +halfW;
+          const tNorm = (ly + halfH) / (2 * halfH);
+          const nx = side === 'left' ? -1 : +1, ny = 0;
+          let sz = perSeatSizes && perSeatSizes[i - 1] ? perSeatSizes[i - 1] : undefined;
+          if (!sz && variant === 'boothU' && table.type !== 'circle') {
+            const thickness = BOOTH_ARC_THICKNESS_U;
+            const outer = length + 2 * thickness;
+            sz = { w: outer, h: outer };
+          }
+          pushChair(lx, ly, nx, ny, variant, 'vertical', side, tNorm, `${side}-${i}`, sz);
+        }
+      }
+    });
+    // Corners
+    const corners: Array<{label:'tl'|'tr'|'br'|'bl'; enabled:boolean; variant:any; lx:number; ly:number; nx:number; ny:number; rot:number}> = [
+      { label:'tl', enabled: !!guides.cornerTL, variant: guides.cornerTLVariant || 'standard', lx:-halfW, ly:-halfH, nx:-1, ny:-1, rot:45 },
+      { label:'tr', enabled: !!guides.cornerTR, variant: guides.cornerTRVariant || 'standard', lx:+halfW, ly:-halfH, nx:+1, ny:-1, rot:-45 },
+      { label:'br', enabled: !!guides.cornerBR, variant: guides.cornerBRVariant || 'standard', lx:+halfW, ly:+halfH, nx:+1, ny:+1, rot:45 },
+      { label:'bl', enabled: !!guides.cornerBL, variant: guides.cornerBLVariant || 'standard', lx:-halfW, ly:+halfH, nx:-1, ny:+1, rot:-45 },
+    ];
+    corners.forEach(c => {
+      if (!c.enabled) return;
+      // For corners treat orient as square for base size
+      const szOverride =
+        c.label === 'tl' ? { w: (guides as any).cornerTLWidthPx, h: (guides as any).cornerTLHeightPx }
+        : c.label === 'tr' ? { w: (guides as any).cornerTRWidthPx, h: (guides as any).cornerTRHeightPx }
+        : c.label === 'br' ? { w: (guides as any).cornerBRWidthPx, h: (guides as any).cornerBRHeightPx }
+        : { w: (guides as any).cornerBLWidthPx, h: (guides as any).cornerBLHeightPx };
+      pushChair(c.lx, c.ly, c.nx, c.ny, c.variant, 'square', c.label, 0.5, `c-${c.label}`, szOverride);
+    });
+    return {
+      ...baseLayout,
+      tables: [...kept, ...toAdd]
+    };
+  };
 
   // Delayed rendering for ReservationForm to prevent input lock issues
   useEffect(() => {
@@ -728,10 +1753,40 @@ const Canvas: React.FC<CanvasProps> = ({
   const [tableResizeHandle, setTableResizeHandle] = useState<'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l' | null>(null);
   const [resizingAnchorPoint, setResizingAnchorPoint] = useState<{ x: number, y: number } | null>(null);
   const [originalTableForResize, setOriginalTableForResize] = useState<any | null>(null);
+  // Chair tool dropdown
+  const [chairToolVariant, setChairToolVariant] = useState<'standard' | 'barstool' | 'boothCurved' | 'boothU'>('standard');
+  const [showChairOptions, setShowChairOptions] = useState(false);
+  const chairDropdownRef = useRef<HTMLDivElement | null>(null);
+  const chairMenuRef = useRef<HTMLDivElement | null>(null);
+  const [chairMenuPos, setChairMenuPos] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!showChairOptions) return;
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (chairDropdownRef.current && chairDropdownRef.current.contains(t)) return;
+      if (chairMenuRef.current && chairMenuRef.current.contains(t)) return;
+      setShowChairOptions(false);
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [showChairOptions]);
 
   // Table name editing state
   const [editingTableId, setEditingTableId] = useState<string | null>(null);
   const [tableNameInput, setTableNameInput] = useState('');
+  // Number conflict confirmation when changing a table number to an existing one
+  const [numberConflict, setNumberConflict] = useState<{ tableId: string, desiredNumber: number } | null>(null);
+  // Numbering policy: 'allowDuplicates' or 'autoShift'
+  const [numberingPolicy, setNumberingPolicy] = useState<'allowDuplicates' | 'autoShift'>(() => {
+    try {
+      return loadFromStorage<'allowDuplicates' | 'autoShift'>('respoint_numbering_policy', 'allowDuplicates');
+    } catch {
+      return 'allowDuplicates';
+    }
+  });
+  useEffect(() => {
+    saveToStorage('respoint_numbering_policy', numberingPolicy);
+  }, [numberingPolicy]);
 
   // Rotation state
   const [isRotating, setIsRotating] = useState(false);
@@ -758,21 +1813,60 @@ const Canvas: React.FC<CanvasProps> = ({
   const [clipboard, setClipboard] = useState<any[]>([]);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
-  const [contextMenuType, setContextMenuType] = useState<'copy' | 'paste' | null>(null);
+  const [contextMenuType, setContextMenuType] = useState<'copy' | 'paste' | 'table' | 'chair' | null>(null);
+  const [contextMenuSelection, setContextMenuSelection] = useState<string[]>([]);
+  const [contextMenuTargetTableId, setContextMenuTargetTableId] = useState<string | null>(null);
   const [lastPasteOffset, setLastPasteOffset] = useState(0);
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  // User preference: show/hide standard table size preview while drawing
+  const [showStandardSizePreview, setShowStandardSizePreview] = useState(true);
+  const [showAddSeatsModal, setShowAddSeatsModal] = useState(false);
+  const [addSeatsTableId, setAddSeatsTableId] = useState<string | null>(null);
+  // Mirror clipboard in a ref to avoid any stale state edge cases across events/renders
+  const clipboardRef = useRef<any[]>([]);
+
+  // Global next auto table number (1..999) across ALL zones, allows duplicates and never resequences
+  const [nextAutoTableNumber, setNextAutoTableNumber] = useState<number>(1);
+  useEffect(() => {
+    // Compute max table number across current working layout and all default zone layouts
+    const allTablesAcrossZones = [
+      ...(layout.tables || []),
+      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
+    ];
+    const maxNumber = allTablesAcrossZones
+      .map(t => (typeof t.number === 'number' && isFinite(t.number) ? t.number : 0))
+      .reduce((m, n) => Math.max(m, n), 0);
+    const computedNext = Math.min(999, Math.max(1, maxNumber + 1));
+    // Only increase, never decrease, to respect manual overrides done earlier in the session
+    setNextAutoTableNumber(prev => (computedNext > prev ? computedNext : prev));
+  }, [layout.tables, zoneLayouts]);
 
   // Hover state
   const [hoveredTable, setHoveredTable] = useState<{ tableId: string, reservation: Reservation, position: { x: number, y: number } } | null>(null);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
+  const hoverRafRef = useRef<number | null>(null);
+  const [isWaiterDragActive, setIsWaiterDragActive] = useState(false);
 
   // Grid settings
   const GRID_SIZE = 10;
+  // Recommended/standard table size:
+  // - rectangle: 5x5 grid cells
+  // - circle:    8x8 grid cells
+  const STANDARD_TABLE_GRID_CELLS = 5; // rectangle
+  const STANDARD_CIRCLE_GRID_CELLS = 8; // circle
+  const STANDARD_TABLE_SIZE = GRID_SIZE * STANDARD_TABLE_GRID_CELLS;
   const DEFAULT_WALL_THICKNESS = 20;
+  // Booth arc thickness (in px) for circular-table arcs
+  const BOOTH_ARC_THICKNESS_CURVED = GRID_SIZE * 2;
+  const BOOTH_ARC_THICKNESS_U = GRID_SIZE * 4;
+  // Fixed wall thickness (px) for U-shaped separé around rectangular tables
+  const RECT_U_WALL_PX = 30;
+  // Fraction of bounding-box width that forms the inner opening of our U-booth SVG (approx 32%)
+  const U_BOOTH_INNER_WIDTH_FRACTION = 32 / 100;
 
-  // Check if user can edit based on activeRole
-  const canEdit = isAuthenticated && (activeRole === 'admin' || activeRole === 'manager');
+  // Check if user can edit based on role permissions
+  const canEdit = isAuthenticated && hasPermission('edit_layout');
 
   // Helper function to show alert modal
   const showAlert = useCallback((title: string, message: string, type: 'info' | 'error' | 'success' = 'error') => {
@@ -797,13 +1891,33 @@ const Canvas: React.FC<CanvasProps> = ({
     }
   }, [showContextMenu]);
 
+  // Keep context menu fully inside canvas bounds
+  React.useLayoutEffect(() => {
+    if (!showContextMenu) return;
+    const canvasEl = canvasRef.current;
+    const menuEl = contextMenuRef.current;
+    if (!canvasEl || !menuEl) return;
+    const canvasRect = canvasEl.getBoundingClientRect();
+    const menuWidth = menuEl.offsetWidth || 0;
+    const menuHeight = menuEl.offsetHeight || 0;
+    const localX = contextMenuPosition.x - canvasRect.left;
+    const localY = contextMenuPosition.y - canvasRect.top;
+    const clampedLocalX = Math.max(0, Math.min(localX, Math.max(0, canvasRect.width - menuWidth - 4)));
+    const clampedLocalY = Math.max(0, Math.min(localY, Math.max(0, canvasRect.height - menuHeight - 4)));
+    const nextX = clampedLocalX + canvasRect.left;
+    const nextY = clampedLocalY + canvasRect.top;
+    if (Math.abs(nextX - contextMenuPosition.x) > 1 || Math.abs(nextY - contextMenuPosition.y) > 1) {
+      setContextMenuPosition({ x: nextX, y: nextY });
+    }
+  }, [showContextMenu, contextMenuPosition.x, contextMenuPosition.y]);
   // Move selected elements with arrow keys
   const moveSelectedElements = useCallback((dx: number, dy: number) => {
-    setLayout({
+    // Move only non-chair tables/texts/walls; chairs will be re-glued to parents
+    let next = {
       ...layout,
       tables: layout.tables.map(table => 
         selectedElements.includes(table.id)
-          ? { ...table, x: table.x + dx, y: table.y + dy }
+          ? (table.type === 'chair' ? table : { ...table, x: table.x + dx, y: table.y + dy })
           : table
       ),
       walls: layout.walls.map(wall =>
@@ -816,10 +1930,18 @@ const Canvas: React.FC<CanvasProps> = ({
           ? { ...text, x: text.x + dx, y: text.y + dy }
           : text
       )
-    });
+    };
+    // Re-glue chairs for any moved circular parents
+    const movedCircleIds = new Set(
+      next.tables.filter(t => selectedElements.includes(t.id) && t.type === 'circle').map(t => t.id)
+    );
+    if (movedCircleIds.size > 0) {
+      next = glueCircularChairsToParents(next, movedCircleIds, true);
+    }
+    setLayout(next);
   }, [layout, selectedElements, setLayout]);
 
-  // Delete selected elements and resequence table numbers to fill gaps
+  // Delete selected elements (do not resequence table numbers)
   const deleteSelectedElements = useCallback((idsToDelete?: string[]) => {
     const elementsToDelete = idsToDelete || selectedElements;
     if (elementsToDelete.length === 0) return;
@@ -828,26 +1950,39 @@ const Canvas: React.FC<CanvasProps> = ({
       layout.tables?.some(t => t.id === id)
     );
 
-    // Delete then resequence tables to keep contiguous numbering
+    // Delete
     const remainingTables = layout.tables.filter(table => !elementsToDelete.includes(table.id));
     const wallsLeft = layout.walls.filter(wall => !elementsToDelete.includes(wall.id));
     const textsLeft = layout.texts.filter(text => !elementsToDelete.includes(text.id));
     
-    // Resequence by current ascending order of numbers
-    const sortedByNumber = [...remainingTables].sort((a, b) => a.number - b.number);
-    const idToNewNumber: Record<string, number> = {};
-    sortedByNumber.forEach((t, idx) => {
-      idToNewNumber[t.id] = idx + 1;
-    });
-    const resequencedTables = remainingTables.map(t => ({
-      ...t,
-      number: idToNewNumber[t.id],
-      name: `${idToNewNumber[t.id]}`
-    }));
+    // Optional renumbering based on policy (current zone only)
+    let tablesAfter = remainingTables;
+    if (isTableDeleted && numberingPolicy === 'autoShift') {
+      // Build set of deleted numbers (non-chair)
+      const deletedNumbers = layout.tables
+        .filter(t => elementsToDelete.includes(t.id) && t.type !== 'chair')
+        .map(t => (typeof t.number === 'number' && isFinite(t.number) ? t.number : null))
+        .filter((n): n is number => n !== null)
+        .sort((a, b) => a - b);
+      if (deletedNumbers.length > 0) {
+        tablesAfter = remainingTables.map(t => {
+          if (t.type === 'chair') return t;
+          const n = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
+          if (n === null) return t;
+          // Count how many deleted numbers are less than this table's number
+          const decrementBy = deletedNumbers.filter(d => d < n).length;
+          if (decrementBy > 0) {
+            const newN = Math.max(1, n - decrementBy);
+            return { ...t, number: newN, name: `${newN}` };
+          }
+          return t;
+        });
+      }
+    }
     
     setLayout({
         ...layout,
-        tables: resequencedTables,
+        tables: tablesAfter,
         walls: wallsLeft,
         texts: textsLeft
     });
@@ -857,7 +1992,7 @@ const Canvas: React.FC<CanvasProps> = ({
     } else {
       setSelectedElements([]);
     }
-  }, [layout, selectedElements, setLayout]);
+  }, [layout, selectedElements, setLayout, numberingPolicy]);
 
   // Update a table property
   const updateTable = (id: string, updates: Partial<typeof layout.tables[0]>) => {
@@ -917,25 +2052,33 @@ const Canvas: React.FC<CanvasProps> = ({
   };
 
   // Copy selected elements
-  const copySelectedElements = useCallback(() => {
+  const copySelectedElements = useCallback((idsOverride?: string[]) => {
     const elementsToCopy: any[] = [];
+    const idsToCopy = idsOverride && idsOverride.length > 0 ? idsOverride : selectedElements;
     
     // Get all selected elements
-    const selectedTables = layout.tables.filter(t => selectedElements.includes(t.id));
-    const selectedWalls = layout.walls.filter(w => selectedElements.includes(w.id));
-    const selectedTexts = layout.texts.filter(t => selectedElements.includes(t.id));
+    const selectedTables = layout.tables.filter(t => idsToCopy.includes(t.id));
+    const selectedWalls = layout.walls.filter(w => idsToCopy.includes(w.id));
+    const selectedTexts = layout.texts.filter(t => idsToCopy.includes(t.id));
     
     elementsToCopy.push(...selectedTables, ...selectedWalls, ...selectedTexts);
     setClipboard(elementsToCopy);
+    clipboardRef.current = elementsToCopy;
+    try { (window as any).__respointClipboard = elementsToCopy; } catch {}
   }, [layout, selectedElements]);
 
   // Paste elements
   const pasteElements = useCallback((atCursor?: { x: number, y: number }) => {
-    if (clipboard.length === 0) return;
+    // Use the most up-to-date source (state, ref, or window backup)
+    const sourceClipboard: any[] =
+      clipboard.length > 0 ? clipboard :
+      (clipboardRef.current && clipboardRef.current.length > 0 ? clipboardRef.current :
+      ((typeof window !== 'undefined' && (window as any).__respointClipboard) || []));
+    if (!sourceClipboard || sourceClipboard.length === 0) return;
     
     // Calculate the center of the copied elements
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    clipboard.forEach(element => {
+    sourceClipboard.forEach(element => {
       if ('x' in element && 'y' in element) {
         minX = Math.min(minX, element.x);
         minY = Math.min(minY, element.y);
@@ -957,46 +2100,70 @@ const Canvas: React.FC<CanvasProps> = ({
     if (atCursor) {
       pasteX = atCursor.x - centerX;
       pasteY = atCursor.y - centerY;
+    } else if (canvasRef.current) {
+      // Center the pasted content in the canvas viewport
+      const rect = canvasRef.current.getBoundingClientRect();
+      const midClientX = rect.left + rect.width / 2;
+      const midClientY = rect.top + rect.height / 2;
+      const { x: canvasCenterX, y: canvasCenterY } = getZoomAdjustedCoordinates(midClientX, midClientY, rect);
+      pasteX = canvasCenterX - centerX;
+      pasteY = canvasCenterY - centerY;
     }
+    // We'll first apply raw delta (no snap), then snap the group's AABB to grid by
+    // shifting ALL pasted elements uniformly, preserving relative offsets.
     
     const newElements: string[] = [];
+    const tableIdMap: Record<string, string> = {};
     const newTables: any[] = [];
     const newWalls: any[] = [];
     const newTexts: any[] = [];
     
-    clipboard.forEach(element => {
+    // Build used numbers set across ALL zones (skip chairs)
+    const usedNumbers = new Set<number>();
+    const allTablesAcrossZones = [
+      ...(layout.tables || []),
+      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
+    ];
+    allTablesAcrossZones.forEach(t => {
+      if (t && t.type !== 'chair') {
+        const n = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
+        if (n !== null && n >= 1 && n <= 999) usedNumbers.add(n);
+      }
+    });
+    const getNextFreeFromSet = () => {
+      for (let i = 1; i <= 999; i++) {
+        if (!usedNumbers.has(i)) return i;
+      }
+      return 999;
+    };
+    
+    sourceClipboard.forEach(element => {
       const id = `${element.id}-${Date.now()}-${Math.random()}`;
       newElements.push(id);
       
-      if ('seats' in element) {
-        // It's a table - assign new global number
-        // Collect all table numbers from ALL zones for global numbering
-        let allNumbers: number[] = [];
-        
-        // Add numbers from current zone
-        allNumbers.push(...(layout.tables || []).map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-        
-        // Add numbers from all other zones
-        Object.entries(zoneLayouts || {}).forEach(([zoneId, zoneLayout]) => {
-          if (zoneLayout?.tables) {
-            allNumbers.push(...zoneLayout.tables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-          }
-        });
-        
-        // Add numbers from tables already created in this paste batch
-        allNumbers.push(...newTables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-        
-        const maxNumber = allNumbers.length > 0 ? Math.max(...allNumbers) : 0;
-        const nextTableNumber = maxNumber + 1;
-        
-        newTables.push({
+      if ('seats' in element && element.type !== 'chair') {
+        // It's a (non-chair) table - assign first free global number
+        const newNumber = getNextFreeFromSet();
+        const newTable = {
           ...element,
           id,
-          number: nextTableNumber,
-          name: `${nextTableNumber}`,
+          number: newNumber,
+          name: `${newNumber}`,
           x: element.x + pasteX,
           y: element.y + pasteY
-        });
+        };
+        newTables.push(newTable);
+        try { tableIdMap[element.id] = id; } catch {}
+        usedNumbers.add(newNumber);
+      } else if (element.type === 'chair') {
+        // Preserve chair semantics: keep number and name neutral for chairs
+        const newChair = {
+          ...element,
+          id,
+          x: (element.x ?? 0) + pasteX,
+          y: (element.y ?? 0) + pasteY
+        };
+        newTables.push(newChair);
       } else if ('thickness' in element) {
         // It's a wall
         newWalls.push({
@@ -1018,13 +2185,67 @@ const Canvas: React.FC<CanvasProps> = ({
       }
     });
     
+    // Snap AABB of pasted group to grid (handles rotations by using rotated corners)
+    let minGX = Infinity, minGY = Infinity, maxGX = -Infinity, maxGY = -Infinity;
+    const accumulateRect = (x: number, y: number, w: number, h: number, rotDeg: number) => {
+      const cx = x + w / 2, cy = y + h / 2;
+      const rad = (rotDeg || 0) * Math.PI / 180;
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      const pts = [
+        { lx: -w/2, ly: -h/2 },
+        { lx: +w/2, ly: -h/2 },
+        { lx: +w/2, ly: +h/2 },
+        { lx: -w/2, ly: +h/2 },
+      ].map(p => ({ x: cx + p.lx * cos - p.ly * sin, y: cy + p.lx * sin + p.ly * cos }));
+      pts.forEach(p => { minGX = Math.min(minGX, p.x); maxGX = Math.max(maxGX, p.x); minGY = Math.min(minGY, p.y); maxGY = Math.max(maxGY, p.y); });
+    };
+    newTables.forEach((t: any) => accumulateRect(t.x, t.y, t.width || 100, t.height || 100, t.rotation || 0));
+    newWalls.forEach((w: any) => {
+      const cx = (w.x1 + w.x2) / 2;
+      const cy = (w.y1 + w.y2) / 2;
+      const length = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      const angle = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+      accumulateRect(cx - length / 2, cy - w.thickness / 2, length, w.thickness, angle);
+    });
+    newTexts.forEach((t: any) => accumulateRect(t.x, t.y, t.width || 200, t.height || 30, t.rotation || 0));
+    if (isFinite(minGX) && isFinite(minGY)) {
+      const dxSnap = snapToGrid(minGX) - minGX;
+      const dySnap = snapToGrid(minGY) - minGY;
+      if (Math.abs(dxSnap) > 0 || Math.abs(dySnap) > 0) {
+        for (let i = 0; i < newTables.length; i++) {
+          newTables[i] = { ...newTables[i], x: newTables[i].x + dxSnap, y: newTables[i].y + dySnap };
+        }
+        for (let i = 0; i < newWalls.length; i++) {
+          newWalls[i] = { ...newWalls[i], x1: newWalls[i].x1 + dxSnap, y1: newWalls[i].y1 + dySnap, x2: newWalls[i].x2 + dxSnap, y2: newWalls[i].y2 + dySnap };
+        }
+        for (let i = 0; i < newTexts.length; i++) {
+          newTexts[i] = { ...newTexts[i], x: newTexts[i].x + dxSnap, y: newTexts[i].y + dySnap };
+        }
+      }
+    }
+    
+    // Remap attachedToTableId for chairs to newly pasted table ids
+    const remappedTables = newTables.map((t: any) => {
+      if (t && t.type === 'chair' && t.attachedToTableId) {
+        const mapped = tableIdMap[t.attachedToTableId];
+        if (mapped) return { ...t, attachedToTableId: mapped };
+      }
+      return t;
+    });
+    
     // Add the new elements to the layout
     setLayout({
       ...layout,
-      tables: [...layout.tables, ...newTables],
+      tables: [...layout.tables, ...remappedTables],
       walls: [...layout.walls, ...newWalls],
       texts: [...layout.texts, ...newTexts]
     });
+    
+    // Update global next auto number to pasted max + 1 (Option A for paste/duplicate)
+    if (newTables.length > 0) {
+      // Update helper state to next currently free number
+      setNextAutoTableNumber(getNextFreeFromSet());
+    }
     
     // Select the pasted elements
     setSelectedElements(newElements);
@@ -1188,6 +2409,8 @@ const Canvas: React.FC<CanvasProps> = ({
         // Entering edit mode - save current layout as original
         setLayoutAtEditStart(JSON.parse(JSON.stringify(layout)));
         setIsEditing(true);
+        // Ensure Move tool is selected when entering edit mode
+        onToolChange('select');
         // Clear hover state when entering edit mode
         setHoveredTable(null);
       } else {
@@ -1197,6 +2420,13 @@ const Canvas: React.FC<CanvasProps> = ({
       }
       setSelectedElements([]);
       setInteractionLayout(null);
+    } else {
+      // Graceful feedback when permissions are missing or role not selected
+      showAlert(
+        'Nema dozvole',
+        'Za uređivanje rasporeda izaberi ulogu sa dozvolom "Uredi raspored" (gore desno u meniju) ili otključaj ulogu.',
+        'info'
+      );
     }
   };
 
@@ -1239,6 +2469,30 @@ const Canvas: React.FC<CanvasProps> = ({
   const snapToGrid = (value: number) => {
     return Math.round(value / GRID_SIZE) * GRID_SIZE;
   };
+  // Snap angle to nearest 90° to keep elements aligned with canvas grid lines
+  const snapAngleToGrid = (angleDeg: number) => {
+    const a = ((angleDeg % 360) + 360) % 360;
+    return Math.round(a / 90) * 90;
+  };
+
+  // Compute the next global table number across ALL zones/layouts
+  const getGlobalNextTableNumber = useCallback((): number => {
+    // Vrati PRVI slobodan broj (1..999) preko svih zona (ignoriši stolice)
+    const used = new Set<number>();
+    const allTablesAcrossZones = [
+      ...(layout.tables || []),
+      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
+    ];
+    allTablesAcrossZones.forEach(t => {
+      if (t && t.type !== 'chair' && typeof t.number === 'number' && isFinite(t.number)) {
+        used.add(t.number);
+      }
+    });
+    for (let i = 1; i <= 999; i++) {
+      if (!used.has(i)) return i;
+    }
+    return 999;
+  }, [layout.tables, zoneLayouts]);
 
   // Force re-render when waiter assignment changes externally
   const [, forceWaiterRefresh] = useState(0);
@@ -1310,9 +2564,10 @@ const Canvas: React.FC<CanvasProps> = ({
     }
     return 0;
   };
-
   // Handle mouse down
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only react to LEFT mouse button for any drawing/placing actions
+    if (e.button !== 0) return;
     // Only allow actions when in edit mode
     if (!isEditing) {
       console.log("Not in edit mode, returning from handleMouseDown");
@@ -1321,8 +2576,8 @@ const Canvas: React.FC<CanvasProps> = ({
 
     const rect = canvasRef.current!.getBoundingClientRect();
     const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
-    const gridX = snapToGrid(x);
-    const gridY = snapToGrid(y);
+    const gridX = snapToGrid(clampX(x));
+    const gridY = snapToGrid(clampY(y));
 
     console.log(`Mouse down at (${x}, ${y}), tool: ${selectedTool}`);
 
@@ -1390,8 +2645,8 @@ const Canvas: React.FC<CanvasProps> = ({
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
-    const gridX = snapToGrid(x);
-    const gridY = snapToGrid(y);
+    const gridX = snapToGrid(clampX(x));
+    const gridY = snapToGrid(clampY(y));
 
     // Check if we should start marquee selection (mouse moved more than 5 pixels)
     if (potentialMarqueeStart && !isMarqueeSelecting && !isDragging) {
@@ -1431,25 +2686,37 @@ const Canvas: React.FC<CanvasProps> = ({
     if (isDrawing) {
       setDrawEnd({ x: gridX, y: gridY });
     } else if (isMarqueeSelecting) {
-      setMarqueeEnd({ x, y });
+      setMarqueeEnd({ x: clampX(x), y: clampY(y) });
       updateMarqueeSelection();
     } else if (isDragging && selectedElements.length > 0) {
       // Move all selected elements
       const deltaX = gridX - dragOffset.x;
       const deltaY = gridY - dragOffset.y;
+      const isGroupDrag = selectedElements.length > 1;
       
       // Use interaction layout during drag
-      const currentLayout = interactionLayout || layout;
+      let currentLayout = interactionLayout || layout;
+      currentLayout = ensureAttachedAngles(currentLayout);
       
       // Move without delay
       requestAnimationFrame(() => {
-        setInteractionLayout({
+        let nextLayout = {
           ...currentLayout,
           tables: currentLayout.tables.map(table => {
             if (selectedElements.includes(table.id)) {
               const baseTable = layoutBeforeDrag?.tables?.find((t:any) => t.id === table.id);
               if (baseTable) {
-                return { ...table, x: baseTable.x + deltaX, y: baseTable.y + deltaY };
+                // Never move chairs directly; they will be glued to their parent.
+                if (baseTable.type === 'chair') return table;
+                // Non-chairs or group-drag chairs: move together; snap non-chairs to grid
+                const w = baseTable.width || (((baseTable as any).type === 'chair') ? GRID_SIZE * 3 : GRID_SIZE * 6);
+                const h = baseTable.height || (((baseTable as any).type === 'chair') ? GRID_SIZE * 3 : GRID_SIZE * 4);
+                const movedX = clampX(baseTable.x + deltaX, w);
+                const movedY = clampY(baseTable.y + deltaY, h);
+                if (((baseTable as any).type) !== 'chair') {
+                  return { ...table, x: snapToGrid(movedX), y: snapToGrid(movedY) };
+                }
+                return { ...table, x: movedX, y: movedY };
               }
             }
             return table;
@@ -1460,10 +2727,10 @@ const Canvas: React.FC<CanvasProps> = ({
               if (baseWall) {
                 return {
                   ...wall,
-                  x1: baseWall.x1 + deltaX,
-                  y1: baseWall.y1 + deltaY,
-                  x2: baseWall.x2 + deltaX,
-                  y2: baseWall.y2 + deltaY
+                  x1: clampX(baseWall.x1 + deltaX),
+                  y1: clampY(baseWall.y1 + deltaY),
+                  x2: clampX(baseWall.x2 + deltaX),
+                  y2: clampY(baseWall.y2 + deltaY)
                 };
               }
             }
@@ -1473,17 +2740,32 @@ const Canvas: React.FC<CanvasProps> = ({
             if (selectedElements.includes(text.id)) {
               const baseText = layoutBeforeDrag?.texts?.find((t:any) => t.id === text.id);
               if (baseText) {
-                return { ...text, x: baseText.x + deltaX, y: baseText.y + deltaY };
+                const w = Math.max(50, baseText.width || 100);
+                const h = Math.max(20, baseText.height || 40);
+                return { ...text, x: clampX(baseText.x + deltaX, w), y: clampY(baseText.y + deltaY, h) };
               }
             }
             return text;
           })
-        });
+        };
+        // Live glue for circular parents in selection (no snap while dragging)
+        const circleIds = new Set(
+          (nextLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                                  .map((t:any) => t.id)
+        );
+        const rectIds = new Set(
+          (nextLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                                  .map((t:any) => t.id)
+        );
+        if (circleIds.size > 0) nextLayout = glueCircularChairsToParents(nextLayout, circleIds, false);
+        if (rectIds.size > 0) nextLayout = glueRectChairsToParents(nextLayout, rectIds, false);
+        setInteractionLayout(nextLayout);
       });
     } else if (isGroupScaling && originalGroupBounds && groupScaleHandle && originalElementStates.length > 0) {
       // Handle group scaling with rotation awareness
       setHasGroupMoved(true); // Mark that group has moved
-      const currentLayout = interactionLayout || layout;
+      let currentLayout = interactionLayout || layout;
+      currentLayout = ensureAttachedAngles(currentLayout);
       
       const groupRotation = originalGroupBounds.rotation || 0;
       const rad = groupRotation * Math.PI / 180;
@@ -1562,12 +2844,38 @@ const Canvas: React.FC<CanvasProps> = ({
           break;
       }
       
-      // Maintain aspect ratio if shift is pressed
-      if (isShiftPressed && ['tl', 'tr', 'bl', 'br'].includes(groupScaleHandle)) {
-        const avgScale = (Math.abs(scaleX) + Math.abs(scaleY)) / 2;
-        scaleX = Math.sign(scaleX) * avgScale;
-        scaleY = Math.sign(scaleY) * avgScale;
+      // Illustrator: Alt/Option scales from center (anchor at group's center)
+      if (isAltPressed) {
+        localAnchorX = 0;
+        localAnchorY = 0;
       }
+      
+      // Illustrator: Shift constrains proportions for any handle
+      if (isShiftPressed) {
+        let s: number;
+        if (['l', 'r'].includes(groupScaleHandle)) {
+          s = Math.abs(scaleX);
+        } else if (['t', 'b'].includes(groupScaleHandle)) {
+          s = Math.abs(scaleY);
+        } else {
+          s = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+        }
+        scaleX = Math.sign(scaleX) * s;
+        scaleY = Math.sign(scaleY) * s;
+      }
+      
+      // If selection is a circular table with its chairs, force uniform scaling always.
+      try {
+        const selectedTables = (currentLayout.tables || []).filter(t => selectedElements.includes(t.id));
+        const nonChairs = selectedTables.filter(t => t && t.type !== 'chair');
+        const isCircleSelection = nonChairs.length === 1 && nonChairs[0].type === 'circle' &&
+          selectedTables.filter(t => t.id !== nonChairs[0].id).every(t => t.type === 'chair' && (t as any).attachedToTableId === nonChairs[0].id);
+        if (isCircleSelection) {
+          const s = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+          scaleX = Math.sign(scaleX) * s;
+          scaleY = Math.sign(scaleY) * s;
+        }
+      } catch {}
       
       // Minimum scale to prevent elements from disappearing
       scaleX = Math.max(0.1, Math.abs(scaleX)) * Math.sign(scaleX);
@@ -1586,6 +2894,8 @@ const Canvas: React.FC<CanvasProps> = ({
           if (selectedElements.includes(table.id)) {
             const initial = groupScaleInitialStates.current[table.id];
             if (initial) {
+              // Skip chairs entirely; they will be glued to their parent after scaling
+              if ((table as any).type === 'chair') return table;
               // Calculate original center point
               const originalCenterX = initial.x + initial.width / 2;
               const originalCenterY = initial.y + initial.height / 2;
@@ -1611,20 +2921,37 @@ const Canvas: React.FC<CanvasProps> = ({
               const newCenterY = globalAnchorY + scaledGlobalOffsetY;
               
               // Scale dimensions
-              const newWidth = initial.width * Math.abs(scaleX);
-              const newHeight = initial.height * Math.abs(scaleY);
+              let newWidth: number;
+              let newHeight: number;
+              
+              const tableRotation = normalizeAngle((table.rotation || 0) - (groupRotation || 0));
+              const theta = tableRotation * Math.PI / 180;
+              const absScaleX = Math.abs(scaleX);
+              const absScaleY = Math.abs(scaleY);
+              // Illustrator-like: apply world scales projected to element's local axes.
+              // This works for all element types (tables, chairs, walls, text).
+                const sLocalX = Math.sqrt((absScaleX * Math.cos(theta)) ** 2 + (absScaleY * Math.sin(theta)) ** 2);
+                const sLocalY = Math.sqrt((absScaleX * Math.sin(theta)) ** 2 + (absScaleY * Math.cos(theta)) ** 2);
+              newWidth = initial.width * sLocalX;
+              newHeight = initial.height * sLocalY;
+              // Enforce uniform scaling for circular tables to prevent distortion
+              if (table.type === 'circle') {
+                const sUniform = Math.max(sLocalX, sLocalY);
+                newWidth = initial.width * sUniform;
+                newHeight = initial.height * sUniform;
+              }
               
               // Convert back to top-left position
               const newX = newCenterX - newWidth / 2;
               const newY = newCenterY - newHeight / 2;
         
-        return {
-          ...table,
-          x: newX,
-          y: newY,
-          width: Math.max(30, newWidth),
-          height: Math.max(30, newHeight)
-        };
+      return {
+        ...table,
+        x: newX,
+        y: newY,
+        width: Math.max(30, newWidth),
+        height: Math.max(30, newHeight),
+      };
             }
           }
           return table;
@@ -1664,15 +2991,15 @@ const Canvas: React.FC<CanvasProps> = ({
               );
               const originalAngle = Math.atan2(originalState.y2 - originalState.y1, originalState.x2 - originalState.x1);
               
-              // Scale the length based on the primary scaling direction
-              let newLength = originalLength;
-              if (['l', 'r'].includes(groupScaleHandle)) {
-                newLength = originalLength * Math.abs(scaleX);
-              } else if (['t', 'b'].includes(groupScaleHandle)) {
-                newLength = originalLength;
-              } else if (['tl', 'tr', 'bl', 'br'].includes(groupScaleHandle)) {
-                newLength = originalLength * Math.abs(scaleX);
-              }
+              // Effective scaling along wall's local axes (length vs thickness) derived from group scales
+              const absSx = Math.abs(scaleX);
+              const absSy = Math.abs(scaleY);
+              const theta = originalAngle - rad; // relative to group's X axis
+              const sLength = Math.sqrt((absSx * Math.cos(theta)) ** 2 + (absSy * Math.sin(theta)) ** 2);
+              const sThick  = Math.sqrt((absSx * Math.sin(theta)) ** 2 + (absSy * Math.cos(theta)) ** 2);
+              let newLength = originalLength * sLength;
+              // Scale wall thickness
+              let newThickness = Math.max(5, originalState.thickness * sThick);
               
               // Calculate new endpoints based on scaled center and length
               const halfLength = newLength / 2;
@@ -1680,16 +3007,6 @@ const Canvas: React.FC<CanvasProps> = ({
               const newY1 = newCenterY - halfLength * Math.sin(originalAngle);
               const newX2 = newCenterX + halfLength * Math.cos(originalAngle);
               const newY2 = newCenterY + halfLength * Math.sin(originalAngle);
-              
-              // Scale wall thickness
-              let newThickness = originalState.thickness;
-              if (['tl', 'tr', 'bl', 'br'].includes(groupScaleHandle)) {
-                const thicknessScale = Math.abs(scaleY);
-                newThickness = Math.max(5, originalState.thickness * thicknessScale);
-              } else if (['t', 'b'].includes(groupScaleHandle)) {
-                const thicknessScale = Math.abs(scaleY);
-                newThickness = Math.max(5, originalState.thickness * thicknessScale);
-              }
         
         return {
           ...wall,
@@ -1719,7 +3036,7 @@ const Canvas: React.FC<CanvasProps> = ({
               const localOffsetX = relativeOffsetX * cos + relativeOffsetY * sin;
               const localOffsetY = -relativeOffsetX * sin + relativeOffsetY * cos;
               
-              // Apply scaling in local coordinate system (position only)
+              // Apply scaling in local coordinate system
               const scaledLocalOffsetX = localOffsetX * scaleX;
               const scaledLocalOffsetY = localOffsetY * scaleY;
               
@@ -1730,16 +3047,32 @@ const Canvas: React.FC<CanvasProps> = ({
               // Calculate new center
               const newCenterX = globalAnchorX + scaledGlobalOffsetX;
               const newCenterY = globalAnchorY + scaledGlobalOffsetY;
-              
-              // Convert back to top-left position (keep original dimensions)
-              const newX = newCenterX - initial.width / 2;
-              const newY = newCenterY - initial.height / 2;
+
+              // Determine uniform scale factor for text (preserve aspect ratio)
+              let uniformScale: number;
+              if (['l', 'r'].includes(groupScaleHandle)) {
+                uniformScale = Math.abs(scaleX);
+              } else if (['t', 'b'].includes(groupScaleHandle)) {
+                uniformScale = Math.abs(scaleY);
+              } else {
+                // Corner handles: use larger factor for intuitive scaling
+                uniformScale = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+              }
+              const baseFont = initial.fontSize ?? (text.fontSize || 16);
+              const newFontSize = Math.max(1, baseFont * uniformScale);
+
+              // Measure text with new font size for accurate top-left position
+              const measured = getTextSize(text.text, newFontSize);
+              const newX = newCenterX - measured.width / 2;
+              const newY = newCenterY - measured.height / 2;
         
-        return {
-          ...text,
-          x: newX,
-                y: newY
-                // Keep original width and height for text rendering
+              return {
+                ...text,
+                x: newX,
+                y: newY,
+                fontSize: newFontSize,
+                width: measured.width,
+                height: measured.height
               };
             }
           }
@@ -1747,11 +3080,23 @@ const Canvas: React.FC<CanvasProps> = ({
         })
       };
       
-      setInteractionLayout(updatedLayout);
+        // Live glue for circular parents in selection during group scaling (no snap)
+        const circleIds = new Set(
+          (updatedLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                                     .map((t:any) => t.id)
+        );
+        const rectIds = new Set(
+          (updatedLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                                     .map((t:any) => t.id)
+        );
+        let glued = circleIds.size > 0 ? glueCircularChairsToParents(updatedLayout, circleIds, false) : updatedLayout;
+        if (rectIds.size > 0) glued = glueRectChairsToParents(glued, rectIds, false);
+        setInteractionLayout(glued);
     } else if (isGroupRotating && originalGroupBounds && Object.keys(groupRotationInitialStates.current).length > 0) {
       // Handle group rotation
       setHasGroupMoved(true); // Mark that group has moved
-      const currentLayout = interactionLayout || layout;
+      let currentLayout = interactionLayout || layout;
+      currentLayout = ensureAttachedAngles(currentLayout);
       const centerX = originalGroupBounds.centerX;
       const centerY = originalGroupBounds.centerY;
       
@@ -1763,24 +3108,10 @@ const Canvas: React.FC<CanvasProps> = ({
         deltaAngle = Math.round(deltaAngle / 45) * 45;
       }
       
-      // Update current rotation angle for display (calculate average current rotation of all objects)
-      let totalCurrentRotation = 0;
-      let rotationCount = 0;
+      // For group rotation, the overlay should rotate exactly by deltaAngle
+      setCurrentRotationAngle(normalizeAngle(deltaAngle));
       
-      // Calculate average current rotation of all selected objects
-      selectedElements.forEach(elementId => {
-        const initial = groupRotationInitialStates.current[elementId];
-        if (initial) {
-          const newRotation = normalizeAngle(initial.rotation + deltaAngle);
-          totalCurrentRotation += newRotation;
-          rotationCount++;
-        }
-      });
-      
-      const averageRotation = rotationCount > 0 ? normalizeAngle(totalCurrentRotation / rotationCount) : 0;
-      setCurrentRotationAngle(averageRotation);
-      
-              console.log('🔄 Group rotation - deltaAngle:', deltaAngle, 'averageRotation:', averageRotation, 'selectedElements:', selectedElements.length);
+              console.log('🔄 Group rotation - deltaAngle:', deltaAngle, 'selectedElements:', selectedElements.length);
       
       const radians = deltaAngle * Math.PI / 180;
       const cos = Math.cos(radians);
@@ -1793,6 +3124,7 @@ const Canvas: React.FC<CanvasProps> = ({
           if (selectedElements.includes(table.id)) {
             const initial = groupRotationInitialStates.current[table.id];
             if (initial) {
+              if (table.type === 'chair') return table;
         // Rotate position around group center
               const oldCenterX = initial.x + initial.width / 2;
               const oldCenterY = initial.y + initial.height / 2;
@@ -1880,11 +3212,24 @@ const Canvas: React.FC<CanvasProps> = ({
           return text;
         })
       };
-      
-      setInteractionLayout(updatedLayout);
+      // Glue chairs live for BOTH circular and rectangular parents in the selection
+      const circleIds = new Set(
+        (updatedLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                                   .map((t:any) => t.id)
+      );
+      const rectIds = new Set(
+        (updatedLayout.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                                   .map((t:any) => t.id)
+      );
+      let gluedLive = updatedLayout;
+      if (circleIds.size > 0) gluedLive = glueCircularChairsToParents(gluedLive, circleIds, false);
+      if (rectIds.size > 0) gluedLive = glueRectChairsToParents(gluedLive, rectIds, false);
+      setInteractionLayout(gluedLive);
     } else if (isRotating && selectedElements.length > 0) {
       // Handle rotation for selected elements
-      const currentLayout = interactionLayout || layout;
+      let currentLayout = interactionLayout || layout;
+      currentLayout = ensureAttachedAngles(currentLayout);
+      
       const element = [...(currentLayout.tables || []), ...(currentLayout.texts || [])].find(
         el => selectedElements.includes(el.id)
       );
@@ -1906,12 +3251,14 @@ const Canvas: React.FC<CanvasProps> = ({
         // Calculate new rotation with normalization
         const newRotation = normalizeAngle((originalRotations[element.id] || 0) + deltaAngle);
         setCurrentRotationAngle(newRotation);
-        
-        setInteractionLayout({
+        // Rotate selected elements
+        const rotatedOnce = {
           ...currentLayout,
           tables: currentLayout.tables.map(table => 
             selectedElements.includes(table.id)
-              ? { ...table, rotation: normalizeAngle((originalRotations[table.id] || 0) + deltaAngle) }
+            ? (table.type === 'chair'
+                ? table
+                : { ...table, rotation: normalizeAngle((originalRotations[table.id] || 0) + deltaAngle) })
               : table
           ),
           texts: currentLayout.texts.map(text =>
@@ -1919,7 +3266,26 @@ const Canvas: React.FC<CanvasProps> = ({
               ? { ...text, rotation: normalizeAngle((originalRotations[text.id] || 0) + deltaAngle) }
               : text
           )
-        });
+        };
+        // If a circular table is being rotated solo (non-group path), glue its chairs
+        const selCircleParents = (rotatedOnce.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle');
+          if (selCircleParents.length > 0) {
+          const circleIds = new Set(selCircleParents.map((t:any) => t.id));
+          const glued = glueCircularChairsToParents(rotatedOnce, circleIds, false);
+          setInteractionLayout(glued);
+              } else {
+          // Also glue rectangular parents in selection
+          const rectIds = new Set(
+            (rotatedOnce.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                                      .map((t:any) => t.id)
+          );
+          if (rectIds.size > 0) {
+            const glued = glueRectChairsToParents(rotatedOnce, rectIds, false);
+            setInteractionLayout(glued);
+          } else {
+            setInteractionLayout(rotatedOnce);
+          }
+        }
       } else if (wall) {
         // Rotate wall
         const centerX = (wall.x1 + wall.x2) / 2;
@@ -1998,7 +3364,9 @@ const Canvas: React.FC<CanvasProps> = ({
     } else if (isResizingTable && selectedElements.length === 1) {
       // Handle table/text/wall resizing
       const elementId = selectedElements[0];
-      const currentLayout = interactionLayout || layout;
+      let currentLayout = interactionLayout || layout;
+      currentLayout = ensureAttachedAngles(currentLayout);
+      
       const table = currentLayout.tables?.find(t => t.id === elementId);
       const text = currentLayout.texts?.find(t => t.id === elementId);
       const wall = currentLayout.walls?.find(w => w.id === elementId);
@@ -2024,21 +3392,33 @@ const Canvas: React.FC<CanvasProps> = ({
             };
 
             if (isShiftPressed) {
-              const originalAspectRatio = originalTableForResize.width / originalTableForResize.height;
-              if (Math.abs(d_local.y) < 1e-6) {
-                 d_local.x = 0;
+              if (originalTableForResize.isWall) {
+                // Corner resize with Shift on a wall: use uniform scale for length & thickness
+                const ow = Math.max(1, originalTableForResize.width);
+                const oh = Math.max(1, originalTableForResize.height);
+                const sx = Math.abs(d_local.x) / ow;
+                const sy = Math.abs(d_local.y) / oh;
+                const s = Math.max(sx, sy);
+                d_local.x = Math.sign(d_local.x) * ow * s;
+                d_local.y = Math.sign(d_local.y) * oh * s;
               } else {
-                  const currentAspectRatio = Math.abs(d_local.x / d_local.y);
-                  if (currentAspectRatio > originalAspectRatio) {
-                    d_local.y = (Math.abs(d_local.x) / originalAspectRatio) * Math.sign(d_local.y);
-                  } else {
-                    d_local.x = (Math.abs(d_local.y) * originalAspectRatio) * Math.sign(d_local.x);
-                  }
+                // Non-wall: keep aspect ratio relative to original
+                const originalAspectRatio = originalTableForResize.width / originalTableForResize.height;
+                if (Math.abs(d_local.y) < 1e-6) {
+                   d_local.x = 0;
+                } else {
+                    const currentAspectRatio = Math.abs(d_local.x / d_local.y);
+                    if (currentAspectRatio > originalAspectRatio) {
+                      d_local.y = (Math.abs(d_local.x) / originalAspectRatio) * Math.sign(d_local.y);
+                    } else {
+                      d_local.x = (Math.abs(d_local.y) * originalAspectRatio) * Math.sign(d_local.x);
+                    }
+                }
               }
             }
 
-                      const newWidth = Math.max(10, Math.abs(d_local.x));  // Reduced min length for wall
-          const newHeight = Math.max(5, Math.abs(d_local.y)); // Reduced min thickness for wall
+            const newWidth = Math.max(10, Math.abs(snapToGrid(d_local.x)));  // Reduced min length for wall
+          const newHeight = Math.max(5, Math.abs(snapToGrid(d_local.y))); // Reduced min thickness for wall
 
             const scale_x = d_local.x > 0 ? 1 : -1;
             const scale_y = d_local.y > 0 ? 1 : -1;
@@ -2105,7 +3485,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   
                   const projLength = mouseVecX * sin + mouseVecY * -cos;
                   const isInverted = projLength < 0;
-                  newHeight = Math.max(5, Math.abs(projLength));
+                  newHeight = Math.max(5, Math.abs(snapToGrid(projLength)));
                   
                   // Calculate new center based on direction
                   if (isInverted) {
@@ -2128,7 +3508,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   
                   const projLength = mouseVecX * -sin + mouseVecY * cos;
                   const isInverted = projLength < 0;
-                  newHeight = Math.max(5, Math.abs(projLength));
+                  newHeight = Math.max(5, Math.abs(snapToGrid(projLength)));
                   
                   // Calculate new center based on direction
                   if (isInverted) {
@@ -2151,7 +3531,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   
                   const projLength = mouseVecX * -cos + mouseVecY * -sin;
                   const isInverted = projLength < 0;
-                  newWidth = Math.max(10, Math.abs(projLength));
+                  newWidth = Math.max(10, Math.abs(snapToGrid(projLength)));
                   
                   // Calculate new center based on direction
                   if (isInverted) {
@@ -2174,7 +3554,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
                   const projLength = mouseVecX * cos + mouseVecY * sin;
                   const isInverted = projLength < 0;
-                  newWidth = Math.max(10, Math.abs(projLength));
+                  newWidth = Math.max(10, Math.abs(snapToGrid(projLength)));
 
                   // Calculate new center based on direction
                   if (isInverted) {
@@ -2333,319 +3713,385 @@ const Canvas: React.FC<CanvasProps> = ({
       // Original table resize logic continues below...
       if (!table) return;
 
-      // New logic for rotated resize on corners
-      if (originalTableForResize && resizingAnchorPoint && tableResizeHandle && ['tl', 'tr', 'bl', 'br'].includes(tableResizeHandle)) {
+      // Rotated resize on corners - mirror exact non-rotated behavior in element-local coords
+      if (
+        originalTableForResize &&
+        resizingAnchorPoint &&
+        tableResizeHandle &&
+        ['tl', 'tr', 'bl', 'br'].includes(tableResizeHandle) &&
+        ((originalTableForResize.rotation || 0) % 360 !== 0)
+      ) {
         const rotationRad = (originalTableForResize.rotation || 0) * Math.PI / 180;
-        
-        const mouseX = x;
-        const mouseY = y;
-        
-        const d_world = { x: mouseX - resizingAnchorPoint.x, y: mouseY - resizingAnchorPoint.y };
-        
-        const cos_neg = Math.cos(-rotationRad);
-        const sin_neg = Math.sin(-rotationRad);
-        
+        const cosNeg = Math.cos(-rotationRad);
+        const sinNeg = Math.sin(-rotationRad);
+        const cosPos = Math.cos(rotationRad);
+        const sinPos = Math.sin(rotationRad);
+
+        const origW = originalTableForResize.width || 100;
+        const origH = originalTableForResize.height || 100;
+        const origCenterX = originalTableForResize.x + origW / 2;
+        const origCenterY = originalTableForResize.y + origH / 2;
+        const minSz = (originalTableForResize && originalTableForResize.type === 'chair') ? GRID_SIZE : 30;
+
+        // Anchor-based, wall-like approach to eliminate jitter:
+        // Treat resizingAnchorPoint as the fixed opposite corner in world coords.
+        // Measure mouse delta in element-local space, snap lengths to grid in local axes,
+        // then compute new center from anchor + rotated half-extents.
+        const d_world = { x: x - resizingAnchorPoint.x, y: y - resizingAnchorPoint.y };
         const d_local = {
-          x: d_world.x * cos_neg - d_world.y * sin_neg,
-          y: d_world.x * sin_neg + d_world.y * cos_neg,
+          x: d_world.x * cosNeg - d_world.y * sinNeg,
+          y: d_world.x * sinNeg + d_world.y * cosNeg,
         };
-
-        if (isShiftPressed) {
-          const originalAspectRatio = (originalTableForResize.width || 100) / (originalTableForResize.height || 100);
-          if (Math.abs(d_local.y) < 1e-6) {
-             d_local.x = 0;
-          } else {
-              const currentAspectRatio = Math.abs(d_local.x / d_local.y);
-              if (currentAspectRatio > originalAspectRatio) {
-                d_local.y = (Math.abs(d_local.x) / originalAspectRatio) * Math.sign(d_local.y);
-              } else {
-                d_local.x = (Math.abs(d_local.y) * originalAspectRatio) * Math.sign(d_local.x);
-              }
-          }
-        }
-        
-        const newWidth = Math.max(30, Math.abs(d_local.x));
-        const newHeight = Math.max(30, Math.abs(d_local.y));
-        
-        const c_local = { x: d_local.x / 2, y: d_local.y / 2 };
-        
-        const cos_pos = Math.cos(rotationRad);
-        const sin_pos = Math.sin(rotationRad);
-
-        const c_offset_world = {
-          x: c_local.x * cos_pos - c_local.y * sin_pos,
-          y: c_local.x * sin_pos + c_local.y * cos_pos,
+        const snappedLocalW = Math.max(minSz, Math.abs(snapToGrid(d_local.x)));
+        const snappedLocalH = Math.max(minSz, Math.abs(snapToGrid(d_local.y)));
+        const sxSign = d_local.x >= 0 ? 1 : -1;
+        const sySign = d_local.y >= 0 ? 1 : -1;
+        const centerOffset = {
+          x: (sxSign * snappedLocalW) / 2,
+          y: (sySign * snappedLocalH) / 2,
         };
-        
-        const newCenterX = resizingAnchorPoint.x + c_offset_world.x;
-        const newCenterY = resizingAnchorPoint.y + c_offset_world.y;
-        
-        const newX = newCenterX - newWidth / 2;
-        const newY = newCenterY - newHeight / 2;
+        const newCenter = {
+          x: resizingAnchorPoint.x + centerOffset.x * cosPos - centerOffset.y * sinPos,
+          y: resizingAnchorPoint.y + centerOffset.x * sinPos + centerOffset.y * cosPos,
+        };
+        const worldX = newCenter.x - snappedLocalW / 2;
+        const worldY = newCenter.y - snappedLocalH / 2;
 
-        setInteractionLayout({
+        {
+          let next = {
           ...currentLayout,
           tables: currentLayout.tables.map(t =>
             t.id === elementId
-              ? { ...t, x: newX, y: newY, width: newWidth, height: newHeight }
+              ? (() => {
+                  const updated: any = { ...t, x: worldX, y: worldY, width: snappedLocalW, height: snappedLocalH };
+                  if (t.type === 'chair' && (t as any).chairVariant === 'boothU') {
+                    const scale = Math.max(snappedLocalW / Math.max(1, origW), snappedLocalH / Math.max(1, origH));
+                    const baseTh = (originalTableForResize as any)?.boothThickness ?? 15;
+                    updated.boothThickness = Math.max(2, Math.round(baseTh * scale));
+                  }
+                  return updated;
+                })()
               : t
           )
-        });
-        return; // Skip old logic
+          };
+          const circleIds = new Set(
+            (next.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                               .map((t:any) => t.id)
+          );
+          if (circleIds.size > 0) next = glueCircularChairsToParents(next, circleIds, false);
+          const rectIds = new Set(
+            (next.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                               .map((t:any) => t.id)
+          );
+          if (rectIds.size > 0) next = glueRectChairsToParents(next, rectIds, false);
+          requestAnimationFrame(() => setInteractionLayout(next));
+        }
+        return;
+
+        // Fallback should never be reached due to early return above
       }
 
       const rotationRad = (table.rotation || 0) * Math.PI / 180;
       const isRotated = (table.rotation || 0) % 360 !== 0;
+      // Chairs have a smaller minimal size to avoid instant jump when starting resize
+      const minTableSize = table.type === 'chair' ? GRID_SIZE : 30;
 
-      // New logic for rotated resize on sides
+      // Rotated resize on sides - mirror non-rotated side behavior in element-local coords
       if (isRotated && originalTableForResize && tableResizeHandle && ['t', 'r', 'b', 'l'].includes(tableResizeHandle)) {
-        const mouseX = x;
-        const mouseY = y;
-
-        const originalWidth = originalTableForResize.width || 100;
-        const originalHeight = originalTableForResize.height || 100;
-        const originalCenterX = originalTableForResize.x + originalWidth / 2;
-        const originalCenterY = originalTableForResize.y + originalHeight / 2;
+        const origW = originalTableForResize.width || 100;
+        const origH = originalTableForResize.height || 100;
+        const origCenterX = originalTableForResize.x + origW / 2;
+        const origCenterY = originalTableForResize.y + origH / 2;
 
         const cos = Math.cos(rotationRad);
         const sin = Math.sin(rotationRad);
 
-        let newWidth = originalWidth;
-        let newHeight = originalHeight;
-        let newCenterX = originalCenterX;
-        let newCenterY = originalCenterY;
+        let newWidth = origW;
+        let newHeight = origH;
+        let newCenterX = origCenterX;
+        let newCenterY = origCenterY;
 
         switch (tableResizeHandle) {
           case 't': {
-              // Anchor at bottom edge of table
-              const anchorX = originalCenterX - (originalHeight / 2) * sin;
-              const anchorY = originalCenterY + (originalHeight / 2) * cos;
-              const mouseVecX = mouseX - anchorX;
-              const mouseVecY = mouseY - anchorY;
-              
-              // Project mouse vector onto local Y-axis {x: sin, y: -cos}
+              // Anchor at bottom edge center
+              const anchorX = origCenterX - (origH / 2) * sin;
+              const anchorY = origCenterY + (origH / 2) * cos;
+              const mouseVecX = x - anchorX;
+              const mouseVecY = y - anchorY;
               const projLength = mouseVecX * sin + mouseVecY * -cos;
-              const isInverted = projLength < 0;
-              newHeight = Math.max(30, Math.abs(projLength));
-              
-              // Calculate new center based on direction
+              const snapped = snapToGrid(projLength);
+              const isInverted = snapped < 0;
+              newHeight = Math.max(minTableSize, Math.abs(snapped));
               if (isInverted) {
-                // When inverted, anchor becomes the top edge
                 newCenterX = anchorX - (newHeight / 2) * sin;
                 newCenterY = anchorY + (newHeight / 2) * cos;
               } else {
-                // Normal case - anchor at bottom
                 newCenterX = anchorX + (newHeight / 2) * sin;
                 newCenterY = anchorY - (newHeight / 2) * cos;
               }
               break;
           }
           case 'b': {
-              // Anchor at top edge of table
-              const anchorX = originalCenterX + (originalHeight / 2) * sin;
-              const anchorY = originalCenterY - (originalHeight / 2) * cos;
-              const mouseVecX = mouseX - anchorX;
-              const mouseVecY = mouseY - anchorY;
-              
-              // Project mouse vector onto inverted local Y-axis {x: -sin, y: cos}
+              // Anchor at top edge center
+              const anchorX = origCenterX + (origH / 2) * sin;
+              const anchorY = origCenterY - (origH / 2) * cos;
+              const mouseVecX = x - anchorX;
+              const mouseVecY = y - anchorY;
               const projLength = mouseVecX * -sin + mouseVecY * cos;
-              const isInverted = projLength < 0;
-              newHeight = Math.max(30, Math.abs(projLength));
-              
-              // Calculate new center based on direction
+              const snapped = snapToGrid(projLength);
+              const isInverted = snapped < 0;
+              newHeight = Math.max(minTableSize, Math.abs(snapped));
               if (isInverted) {
-                // When inverted, anchor becomes the bottom edge
                 newCenterX = anchorX + (newHeight / 2) * sin;
                 newCenterY = anchorY - (newHeight / 2) * cos;
               } else {
-                // Normal case - anchor at top
                 newCenterX = anchorX - (newHeight / 2) * sin;
                 newCenterY = anchorY + (newHeight / 2) * cos;
               }
               break;
           }
           case 'l': {
-              // Anchor at right edge of table
-              const anchorX = originalCenterX + (originalWidth / 2) * cos;
-              const anchorY = originalCenterY + (originalWidth / 2) * sin;
-              const mouseVecX = mouseX - anchorX;
-              const mouseVecY = mouseY - anchorY;
-              
-              // Project mouse vector onto inverted local X-axis {x: -cos, y: -sin}
+              // Anchor at right edge center
+              const anchorX = origCenterX + (origW / 2) * cos;
+              const anchorY = origCenterY + (origW / 2) * sin;
+              const mouseVecX = x - anchorX;
+              const mouseVecY = y - anchorY;
               const projLength = mouseVecX * -cos + mouseVecY * -sin;
-              const isInverted = projLength < 0;
-              newWidth = Math.max(30, Math.abs(projLength));
-              
-              // Calculate new center based on direction
+              const snapped = snapToGrid(projLength);
+              const isInverted = snapped < 0;
+              newWidth = Math.max(minTableSize, Math.abs(snapped));
               if (isInverted) {
-                // When inverted, anchor becomes the left edge
                 newCenterX = anchorX + (newWidth / 2) * cos;
                 newCenterY = anchorY + (newWidth / 2) * sin;
               } else {
-                // Normal case - anchor at right
                 newCenterX = anchorX - (newWidth / 2) * cos;
                 newCenterY = anchorY - (newWidth / 2) * sin;
               }
               break;
           }
           case 'r': {
-              // Anchor at left edge of table
-              const anchorX = originalCenterX - (originalWidth / 2) * cos;
-              const anchorY = originalCenterY - (originalWidth / 2) * sin;
-              const mouseVecX = mouseX - anchorX;
-              const mouseVecY = mouseY - anchorY;
-
-              // Project mouse vector onto local X-axis {x: cos, y: sin}
+              // Anchor at left edge center
+              const anchorX = origCenterX - (origW / 2) * cos;
+              const anchorY = origCenterY - (origW / 2) * sin;
+              const mouseVecX = x - anchorX;
+              const mouseVecY = y - anchorY;
               const projLength = mouseVecX * cos + mouseVecY * sin;
-              const isInverted = projLength < 0;
-              newWidth = Math.max(30, Math.abs(projLength));
-
-              // Calculate new center based on direction
+              const snapped = snapToGrid(projLength);
+              const isInverted = snapped < 0;
+              newWidth = Math.max(minTableSize, Math.abs(snapped));
               if (isInverted) {
-                // When inverted, anchor becomes the right edge
                 newCenterX = anchorX - (newWidth / 2) * cos;
                 newCenterY = anchorY - (newWidth / 2) * sin;
               } else {
-                // Normal case - anchor at left
                 newCenterX = anchorX + (newWidth / 2) * cos;
                 newCenterY = anchorY + (newWidth / 2) * sin;
               }
               break;
           }
         }
-        
-        const finalNewX = newCenterX - newWidth / 2;
-        const finalNewY = newCenterY - newHeight / 2;
 
-        setInteractionLayout({
+        const newX = newCenterX - newWidth / 2;
+        const newY = newCenterY - newHeight / 2;
+
+        {
+          let next = {
           ...currentLayout,
           tables: currentLayout.tables.map(t =>
             t.id === elementId
-              ? { ...t, x: finalNewX, y: finalNewY, width: newWidth, height: newHeight }
+              ? { ...t, x: newX, y: newY, width: newWidth, height: newHeight }
               : t
           )
-        });
+          };
+          const circleIds = new Set(
+            (next.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                               .map((t:any) => t.id)
+          );
+          if (circleIds.size > 0) next = glueCircularChairsToParents(next, circleIds, false);
+          try { next = autoGenerateChairsForTable(next, elementId); } catch {}
+          requestAnimationFrame(() => setInteractionLayout(next));
+        }
         return; // Skip old logic
       }
 
 
       // Get the original bounds
-      const originalLeft = table.x;
-      const originalTop = table.y;
-      const originalRight = table.x + (table.width || 100);
-      const originalBottom = table.y + (table.height || 100);
+      // Always anchor against the geometry from the moment resize started.
+      // Using current (live) table values can drift the anchor when chairs re-glue during interaction.
+      const baseForResize = (originalTableForResize as any) || table;
+      const originalLeft = baseForResize.x;
+      const originalTop = baseForResize.y;
+      const originalRight = baseForResize.x + (baseForResize.width || 100);
+      const originalBottom = baseForResize.y + (baseForResize.height || 100);
 
       let newX = table.x;
       let newY = table.y;
       let newWidth = table.width || 100;
       let newHeight = table.height || 100;
-
-      // Calculate new dimensions based on handle
+      // Calculate new dimensions based on handle using raw (unsnapped) mouse for stability
+      const rawClampedX = clampX(x);
+      const rawClampedY = clampY(y);
       if (tableResizeHandle) {
         switch (tableResizeHandle) {
           case 'tl': // Top-left - anchor bottom-right
-            newX = Math.min(gridX, originalRight - 30);
-            newY = Math.min(gridY, originalBottom - 30);
+            newX = Math.min(rawClampedX, originalRight - minTableSize);
+            newY = Math.min(rawClampedY, originalBottom - minTableSize);
             newWidth = originalRight - newX;
             newHeight = originalBottom - newY;
             break;
             
           case 'tr': // Top-right - anchor bottom-left
-            newY = Math.min(gridY, originalBottom - 30);
-            newWidth = Math.max(30, gridX - originalLeft);
+            newY = Math.min(rawClampedY, originalBottom - minTableSize);
+            newWidth = Math.max(minTableSize, rawClampedX - originalLeft);
             newHeight = originalBottom - newY;
             break;
             
           case 'bl': // Bottom-left - anchor top-right
-            newX = Math.min(gridX, originalRight - 30);
+            newX = Math.min(rawClampedX, originalRight - minTableSize);
             newWidth = originalRight - newX;
-            newHeight = Math.max(30, gridY - originalTop);
+            newHeight = Math.max(minTableSize, rawClampedY - originalTop);
             break;
             
           case 'br': // Bottom-right - anchor top-left
-            newWidth = Math.max(30, gridX - originalLeft);
-            newHeight = Math.max(30, gridY - originalTop);
+            newWidth = Math.max(minTableSize, rawClampedX - originalLeft);
+            newHeight = Math.max(minTableSize, rawClampedY - originalTop);
             break;
             
           case 't': // Top - anchor bottom
-            newY = Math.min(gridY, originalBottom - 30);
+            newY = Math.min(rawClampedY, originalBottom - minTableSize);
             newHeight = originalBottom - newY;
             break;
             
           case 'r': // Right - anchor left
-            newWidth = Math.max(30, gridX - originalLeft);
+            newWidth = Math.max(minTableSize, rawClampedX - originalLeft);
             break;
             
           case 'b': // Bottom - anchor top
-            newHeight = Math.max(30, gridY - originalTop);
+            newHeight = Math.max(minTableSize, rawClampedY - originalTop);
             break;
             
           case 'l': // Left - anchor right
-            newX = Math.min(gridX, originalRight - 30);
+            newX = Math.min(rawClampedX, originalRight - minTableSize);
             newWidth = originalRight - newX;
             break;
         }
       }
 
-      // If shift is pressed and using corner handles, maintain aspect ratio
-      if (isShiftPressed && tableResizeHandle && ['tl', 'tr', 'bl', 'br'].includes(tableResizeHandle)) {
-        const originalAspectRatio = (table.width || 100) / (table.height || 100);
-        
-        // Calculate which dimension changed more
-        const widthChange = Math.abs(newWidth - (table.width || 100));
-        const heightChange = Math.abs(newHeight - (table.height || 100));
-        
-        if (widthChange > heightChange) {
-          // Width changed more, adjust height to maintain ratio
-          newHeight = Math.round(newWidth / originalAspectRatio);
-          
-          // Adjust position based on handle
+      // Maintain aspect ratio: always for circular tables; always for booth variants; or when Shift is pressed (corner handles only)
+      const isBoothCurvedNR = table && table.type === 'chair' && (table as any).chairVariant === 'boothCurved';
+      const isBoothUNR = table && table.type === 'chair' && (table as any).chairVariant === 'boothU';
+      const isCircleNR = table && table.type === 'circle';
+      if ((isCircleNR || isShiftPressed || isBoothCurvedNR || isBoothUNR) && tableResizeHandle && ['tl', 'tr', 'bl', 'br'].includes(tableResizeHandle)) {
+        const origW = (baseForResize.width || 100);
+        const origH = (baseForResize.height || 100);
+        const targetAspectRatio = isBoothCurvedNR ? 2 : isBoothUNR ? 1 : (origW / origH);
+        // Stable uniform scaling from original size
+        const scale = Math.max(newWidth / Math.max(1, origW), newHeight / Math.max(1, origH));
+        newWidth = Math.round(origW * scale);
+        newHeight = Math.round(origH * scale);
+        // Re-anchor based on handle to keep opposite corner fixed
           switch (tableResizeHandle) {
             case 'tl':
+            newX = originalRight - newWidth;
               newY = originalBottom - newHeight;
               break;
             case 'tr':
               newY = originalBottom - newHeight;
               break;
-          }
-        } else {
-          // Height changed more, adjust width to maintain ratio
-          newWidth = Math.round(newHeight * originalAspectRatio);
-          
-          // Adjust position based on handle
-          switch (tableResizeHandle) {
-            case 'tl':
-              newX = originalRight - newWidth;
-              break;
             case 'bl':
               newX = originalRight - newWidth;
               break;
-          }
+          case 'br':
+          default:
+            // anchored at top-left, nothing to change
+            break;
         }
       }
 
-      // Ensure minimum dimensions
-      newWidth = Math.max(30, newWidth);
-      newHeight = Math.max(30, newHeight);
-      
-      // Ensure position doesn't cause negative dimensions
-      if (newX > originalRight - 30) {
-        newX = originalRight - 30;
-        newWidth = 30;
-      }
-      if (newY > originalBottom - 30) {
-        newY = originalBottom - 30;
-        newHeight = 30;
+      // Quantize size to grid for stability, then re-anchor position to keep the correct opposite side fixed
+      if (tableResizeHandle) {
+        const qW = Math.max(minTableSize, Math.ceil(newWidth / GRID_SIZE) * GRID_SIZE);
+        const qH = Math.max(minTableSize, Math.ceil(newHeight / GRID_SIZE) * GRID_SIZE);
+        switch (tableResizeHandle) {
+          case 'tl':
+            newX = originalRight - qW;
+            newY = originalBottom - qH;
+            break;
+          case 'tr':
+            newX = originalLeft;
+            newY = originalBottom - qH;
+            break;
+          case 'bl':
+            newX = originalRight - qW;
+            newY = originalTop;
+            break;
+          case 'br':
+            newX = originalLeft;
+            newY = originalTop;
+            break;
+          case 't':
+            newY = originalBottom - qH;
+            break;
+          case 'b':
+            newY = originalTop;
+            break;
+          case 'l':
+            newX = originalRight - qW;
+            break;
+          case 'r':
+            newX = originalLeft;
+            break;
+        }
+        newWidth = qW;
+        newHeight = qH;
       }
 
-      setInteractionLayout({
+      // Ensure minimum dimensions
+      newWidth = Math.max(minTableSize, newWidth);
+      newHeight = Math.max(minTableSize, newHeight);
+      
+      // Ensure position doesn't cause negative dimensions
+      if (newX > originalRight - minTableSize) {
+        newX = originalRight - minTableSize;
+        newWidth = minTableSize;
+      }
+      if (newY > originalBottom - minTableSize) {
+        newY = originalBottom - minTableSize;
+        newHeight = minTableSize;
+      }
+
+      {
+        let next = {
         ...currentLayout,
         tables: currentLayout.tables.map(t =>
           t.id === elementId
-            ? { ...t, x: newX, y: newY, width: newWidth, height: newHeight }
+            ? (() => {
+                const updated: any = { ...t, x: newX, y: newY, width: newWidth, height: newHeight };
+                if (t.type === 'chair' && (t as any).chairVariant === 'boothU' && tableResizeHandle && ['tl','tr','bl','br'].includes(tableResizeHandle)) {
+                  const baseW = (table.width || 100);
+                  const baseH = (table.height || 100);
+                  const scaleX = newWidth / Math.max(1, baseW);
+                  const scaleY = newHeight / Math.max(1, baseH);
+                  const s = (Math.abs(scaleX) + Math.abs(scaleY)) / 2;
+                  const baseTh = (t as any).boothThickness ?? 15;
+                  updated.boothThickness = Math.max(2, Math.round(baseTh * s));
+                }
+                return updated;
+              })()
             : t
         )
-      });
+        };
+        const circleIds = new Set(
+          (next.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type === 'circle')
+                             .map((t:any) => t.id)
+        );
+        if (circleIds.size > 0) next = glueCircularChairsToParents(next, circleIds, false);
+        const rectIds = new Set(
+          (next.tables || []).filter((t:any) => selectedElements.includes(t.id) && t.type !== 'circle' && t.type !== 'chair')
+                             .map((t:any) => t.id)
+        );
+        if (rectIds.size > 0) next = glueRectChairsToParents(next, rectIds, false);
+        requestAnimationFrame(() => setInteractionLayout(next));
+      }
     }
   };
 
@@ -2694,7 +4140,7 @@ const Canvas: React.FC<CanvasProps> = ({
       y2: marqueeEnd.y
     };
     
-    const newSelection: string[] = [];
+    let newSelection: string[] = [];
     const currentLayout = interactionLayout || layout;
     
     // Check tables
@@ -2718,10 +4164,40 @@ const Canvas: React.FC<CanvasProps> = ({
       }
     });
     
+    // Expand with attached chairs for any selected tables
+    const expandWithAttachedChairs = (ids: string[]) => {
+      const current = interactionLayout || layout;
+      const set = new Set(ids);
+      const parents = (current.tables || []).filter(t => t && t.type !== 'chair' && set.has(t.id));
+      if (parents.length > 0) {
+        const attached = (current.tables || []).filter(t => t?.type === 'chair' && parents.some(tb => t.attachedToTableId === tb.id)).map(t => t.id);
+        attached.forEach(id => set.add(id));
+      }
+      return Array.from(set);
+    };
+    // Remove chairs selected alone (without their parent table)
+    (() => {
+      const current = interactionLayout || layout;
+      const set = new Set(newSelection);
+      const toRemove: string[] = [];
+      (current.tables || []).forEach((t: any) => {
+        if (t && t.type === 'chair' && t.attachedToTableId && set.has(t.id)) {
+          const parent = (current.tables || []).find((p: any) => p.id === t.attachedToTableId && p.type !== 'chair');
+          if (parent && !set.has(parent.id)) {
+            toRemove.push(t.id);
+          }
+        }
+      });
+      if (toRemove.length > 0) {
+        newSelection = newSelection.filter(id => !toRemove.includes(id));
+      }
+    })();
+    newSelection = expandWithAttachedChairs(newSelection);
+    
     if (isShiftPressed) {
       // Add to existing selection - preserve rotation if adding to same group
       setSelectedElements(prev => {
-        const combined = [...new Set([...prev, ...newSelection])];
+        const combined = expandWithAttachedChairs([...new Set([...prev, ...newSelection])]);
         // Only reset rotation if this is a completely new selection
         if (prev.length === 0 && newSelection.length > 0) {
           setGroupTotalRotation(0);
@@ -2748,46 +4224,39 @@ const Canvas: React.FC<CanvasProps> = ({
 
   // Handle mouse up
   const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only finalize drawing/placing on LEFT mouse button
+    if (e.button !== 0) return;
     if (isDrawing) {
       setIsDrawing(false);
 
       const rect = canvasRef.current!.getBoundingClientRect();
       const { x: endRawX, y: endRawY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
-      const endX = snapToGrid(endRawX);
-      const endY = snapToGrid(endRawY);
+      const endX = snapToGrid(clampX(endRawX));
+      const endY = snapToGrid(clampY(endRawY));
 
       if (selectedTool === 'table') {
-        const { width, height } = getConstrainedDimensions(drawStart.x, drawStart.y, endX, endY, isShiftPressed);
+        const { width, height } = getConstrainedDimensions(drawStart.x, drawStart.y, endX, endY, isShiftPressed || tableType === 'circle');
         
         // Only create table if it has some size
         if (Math.abs(width) > 10 && Math.abs(height) > 10) {
-          // Collect all table numbers from ALL zones for global numbering
-          let allNumbers: number[] = [];
-          
-          // Add numbers from current zone
-          const currentTables = layout.tables || [];
-          allNumbers.push(...currentTables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-          
-          // Add numbers from all other zones
-          Object.entries(zoneLayouts || {}).forEach(([zoneId, zoneLayout]) => {
-            if (zoneLayout?.tables) {
-              allNumbers.push(...zoneLayout.tables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-            }
-          });
-          
-          // Find the highest number across all zones
-          const maxNumber = allNumbers.length > 0 ? Math.max(...allNumbers) : 0;
-          const nextTableNumber = maxNumber + 1;
+          // Compute next number globally across all zones
+          const nextNumber = getGlobalNextTableNumber();
 
+          const wAbs = Math.abs(width);
+          const hAbs = Math.abs(height);
+          const startX = width < 0 ? drawStart.x + width : drawStart.x;
+          const startY = height < 0 ? drawStart.y + height : drawStart.y;
+          const clampedX = clampX(startX, wAbs);
+          const clampedY = clampY(startY, hAbs);
           const newTable = {
             id: `table-${Date.now()}`,
-            number: nextTableNumber,
-            x: width < 0 ? drawStart.x + width : drawStart.x,
-            y: height < 0 ? drawStart.y + height : drawStart.y,
-            width: Math.abs(width),
-            height: Math.abs(height),
+            number: nextNumber,
+            x: clampedX,
+            y: clampedY,
+            width: wAbs,
+            height: hAbs,
             type: tableType,
-            name: `${nextTableNumber}`,
+            name: `${nextNumber}`,
             seats: 4,
             status: 'available' as const,
             color: '#FFFFFF',
@@ -2798,6 +4267,8 @@ const Canvas: React.FC<CanvasProps> = ({
             ...layout,
             tables: [...(layout.tables || []), newTable]
           });
+          // Advance global next auto number
+          setNextAutoTableNumber(Math.min(999, nextNumber + 1));
           
           // Clear interaction layout to ensure undo/redo works properly
           setInteractionLayout(null);
@@ -2811,8 +4282,8 @@ const Canvas: React.FC<CanvasProps> = ({
         // Only create wall if it has reasonable size
         if (wallWidth > 5 && wallHeight > 5) {
           // Always create horizontal wall (like tables), width = length, height = thickness
-          const startX = width < 0 ? drawStart.x + width : drawStart.x;
-          const centerY = (height < 0 ? drawStart.y + height : drawStart.y) + wallHeight / 2;
+          const startX = clampX(width < 0 ? drawStart.x + width : drawStart.x);
+          const centerY = clampY((height < 0 ? drawStart.y + height : drawStart.y) + wallHeight / 2);
           
           let thickness = wallHeight;
           
@@ -2823,10 +4294,10 @@ const Canvas: React.FC<CanvasProps> = ({
           
           const newWall = {
             id: `wall-${Date.now()}`,
-            x1: startX,
-            y1: centerY,
-            x2: startX + wallWidth,
-            y2: centerY,
+            x1: clampX(startX),
+            y1: clampY(centerY),
+            x2: clampX(startX + wallWidth),
+            y2: clampY(centerY),
             thickness
           };
 
@@ -2857,7 +4328,75 @@ const Canvas: React.FC<CanvasProps> = ({
 
     // Apply interaction layout to actual layout if there were changes
     if (interactionLayout && (isDragging || isResizingWall || isResizingTable || isRotating || isGroupScaling || isGroupRotating)) {
-      setLayout(interactionLayout);
+      // Commit interactively produced result. After rotation (single or group), snap the
+      // selection bounding box to the grid by shifting ALL selected elements uniformly.
+      let finalized = interactionLayout;
+      if ((isGroupRotating || isRotating) && selectedElements.length > 0) {
+        // Compute AABB of current selection from the interaction layout
+        const current = interactionLayout;
+        const sel = new Set(selectedElements);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        // Compute corners inline
+        const accumulateRect = (x: number, y: number, w: number, h: number, rotDeg: number) => {
+          const cx = x + w / 2, cy = y + h / 2;
+          const rad = (rotDeg || 0) * Math.PI / 180;
+          const cos = Math.cos(rad), sin = Math.sin(rad);
+          const pts = [
+            { lx: -w/2, ly: -h/2 },
+            { lx: +w/2, ly: -h/2 },
+            { lx: +w/2, ly: +h/2 },
+            { lx: -w/2, ly: +h/2 },
+          ].map(p => ({ x: cx + p.lx * cos - p.ly * sin, y: cy + p.lx * sin + p.ly * cos }));
+          pts.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+        };
+        (current.tables || []).forEach((t: any) => {
+          if (!sel.has(t.id)) return;
+          accumulateRect(t.x, t.y, t.width || 100, t.height || 100, t.rotation || 0);
+        });
+        // Walls
+        (current.walls || []).forEach((w: any) => {
+          if (!sel.has(w.id)) return;
+          const cx = (w.x1 + w.x2) / 2;
+          const cy = (w.y1 + w.y2) / 2;
+          const length = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+          const angle = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+          accumulateRect(cx - length / 2, cy - w.thickness / 2, length, w.thickness, angle);
+        });
+        // Texts
+        (current.texts || []).forEach((t: any) => {
+          if (!sel.has(t.id)) return;
+          accumulateRect(t.x, t.y, t.width || 200, t.height || 30, t.rotation || 0);
+        });
+        if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+          const dx = snapToGrid(minX) - minX;
+          const dy = snapToGrid(minY) - minY;
+          if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+            // Build set of selected parent table ids to also shift their attached chairs
+            const selectedParentIds = new Set<string>();
+            (current.tables || []).forEach((t: any) => {
+              if (sel.has(t.id) && t.type !== 'chair') selectedParentIds.add(t.id);
+            });
+            finalized = {
+              ...current,
+              tables: (current.tables || []).map((t: any) => {
+                // Shift selected elements
+                if (sel.has(t.id)) return { ...t, x: t.x + dx, y: t.y + dy };
+                // Also shift chairs attached to selected tables
+                if (t.type === 'chair' && t.attachedToTableId && selectedParentIds.has(t.attachedToTableId)) {
+                  return { ...t, x: t.x + dx, y: t.y + dy };
+                }
+                return t;
+              }),
+              walls: (current.walls || []).map((w: any) => sel.has(w.id) ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w),
+              texts: (current.texts || []).map((t: any) => sel.has(t.id) ? { ...t, x: t.x + dx, y: t.y + dy } : t)
+            };
+          }
+        }
+      }
+      // NOTE: No further chair re-glue here.
+      // Chairs have already followed the live interaction, and we only apply the same dx/dy
+      // translation to them as to their parent tables when snapping the bounding box.
+      setLayout(finalized);
       // Clear interaction layout after applying to ensure UI uses the main layout
       setInteractionLayout(null);
     }
@@ -2951,7 +4490,8 @@ const Canvas: React.FC<CanvasProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
-    if (!isEditing) return;
+    // Allow opening the canvas context menu ONLY when the Move Tool (select) is active
+    if (!isEditing || selectedTool !== 'select') return;
     
     const rect = canvasRef.current!.getBoundingClientRect();
     const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
@@ -2959,17 +4499,57 @@ const Canvas: React.FC<CanvasProps> = ({
     // Check if clicking on an element
     const clickedElement = getElementAtPosition(x, y);
     
-    if (clickedElement) {
-      // Show copy menu
-      setContextMenuType('copy');
-      // Select the element if not already selected
-      if (!selectedElements.includes(clickedElement)) {
-        setSelectedElements([clickedElement]);
+  if (clickedElement) {
+      // Determine what was clicked: table (chair/non-chair), text, or wall
+      const currentLayout = interactionLayout || layout;
+      const table = currentLayout.tables?.find(t => t.id === clickedElement);
+      const isChair = !!(table && table.type === 'chair');
+      const isNonChairTable = !!(table && table.type !== 'chair');
+      const isWall = (currentLayout.walls || []).some(w => w.id === clickedElement);
+      const isText = (currentLayout.texts || []).some(t => t.id === clickedElement);
+
+      // Choose context menu:
+      // - Non-chair table => table menu
+      // - Chair => chair styles menu
+      // - Wall/Text/others => simple copy/delete menu
+      if (isNonChairTable) {
+        setContextMenuType('table');
+        setContextMenuTargetTableId(table?.id || null);
+      } else if (isChair) {
+        // Redirect chair context menu to its parent table so chairs are edited only via Add Seats
+        const parent = (currentLayout.tables || []).find((t:any) => t && t.type !== 'chair' && t.id === (table as any)?.attachedToTableId);
+        setContextMenuType('table');
+        setContextMenuTargetTableId(parent?.id || null);
+      } else if (isWall || isText) {
+        setContextMenuType('copy');
+        setContextMenuTargetTableId(null);
+      } else {
+        setContextMenuType('copy');
+        setContextMenuTargetTableId(null);
       }
+
+      // Snapshot intended copy selection to avoid async setState race
+      const intendedSelection = (() => {
+        if (isChair) {
+          const parent = (currentLayout.tables || []).find((t:any) => t && t.type !== 'chair' && t.id === (table as any)?.attachedToTableId);
+          const parentId = parent?.id || clickedElement;
+          return selectedElements.includes(parentId) ? selectedElements : [parentId];
+        }
+        return selectedElements.includes(clickedElement) ? selectedElements : [clickedElement];
+      })();
+      setContextMenuSelection(intendedSelection);
+      // Reflect selection visually
+      const anchorId = isChair ? ((currentLayout.tables || []).find((t:any) => t && t.type !== 'chair' && t.id === (table as any)?.attachedToTableId)?.id || clickedElement) : clickedElement;
+      if (!selectedElements.includes(anchorId)) setSelectedElements(intendedSelection);
     } else {
       // Show paste menu only if we have something in clipboard
-      if (clipboard.length > 0) {
+    const hasClipboard = clipboard.length > 0 ||
+      (clipboardRef.current && clipboardRef.current.length > 0) ||
+      ((typeof window !== 'undefined' && (window as any).__respointClipboard && (window as any).__respointClipboard.length > 0));
+    if (hasClipboard) {
         setContextMenuType('paste');
+      setContextMenuSelection([]);
+        setContextMenuTargetTableId(null);
       } else {
         return; // Don't show context menu if nothing to paste
       }
@@ -3079,17 +4659,133 @@ const Canvas: React.FC<CanvasProps> = ({
     
     return null;
   };
-
   // Handle context menu actions
   const handleContextMenuAction = (action: string) => {
     if (action === 'copy') {
-      copySelectedElements();
+      // Use the menu snapshot to avoid races with selection updates
+      copySelectedElements(contextMenuSelection.length > 0 ? contextMenuSelection : selectedElements);
     } else if (action === 'paste') {
       const rect = canvasRef.current!.getBoundingClientRect();
       const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(contextMenuPosition.x, contextMenuPosition.y, rect);
       pasteElements({ x: snapToGrid(canvasX), y: snapToGrid(canvasY) });
+    } else if (action === 'add_seats') {
+      if (contextMenuTargetTableId) {
+        setAddSeatsTableId(contextMenuTargetTableId);
+        setShowAddSeatsModal(true);
+      }
+    } else if (
+      action === 'set_chair_variant_standard' ||
+      action === 'set_chair_variant_barstool' ||
+      action === 'set_chair_variant_booth' ||
+      action === 'set_chair_variant_booth_curved' ||
+      action === 'set_chair_variant_booth_u'
+    ) {
+      const variant =
+        action === 'set_chair_variant_standard' ? 'standard' :
+        action === 'set_chair_variant_barstool' ? 'barstool' :
+        action === 'set_chair_variant_booth_u' ? 'boothU' :
+        'boothCurved';
+      const ids = (contextMenuSelection.length > 0 ? contextMenuSelection : selectedElements);
+      const updated = {
+        ...(interactionLayout || layout),
+        tables: (interactionLayout || layout).tables.map((t: any) => {
+          if (ids.includes(t.id) && t.type === 'chair') {
+            // Adjust aspect ratios for booth variants to keep geometry visually correct
+            if (variant === 'boothCurved') {
+              const currentW = Math.max(1, t.width || GRID_SIZE * 4);
+              const currentH = Math.max(1, t.height || GRID_SIZE * 2);
+              const centerX = t.x + currentW / 2;
+              const centerY = t.y + currentH / 2;
+              const targetW = Math.max(2, Math.round(currentH * 2)); // enforce 2:1 (W:H)
+              const newX = clampX(centerX - targetW / 2, targetW);
+              return { ...t, chairVariant: 'boothCurved', width: targetW, x: newX };
+            }
+            if (variant === 'boothU') {
+              const currentW = Math.max(1, t.width || GRID_SIZE * 4);
+              const currentH = Math.max(1, t.height || GRID_SIZE * 4);
+              const centerX = t.x + currentW / 2;
+              const centerY = t.y + currentH / 2;
+              const target = Math.round(Math.min(currentW, currentH)); // enforce ~1:1
+              const newX = clampX(centerX - target / 2, target);
+              const newY = clampY(centerY - target / 2, target);
+              const th = (t as any).boothThickness ?? 15;
+              const base = Math.min(currentW, currentH);
+              const scale = base > 0 ? (target / base) : 1;
+              return { ...t, chairVariant: 'boothU', width: target, height: target, x: newX, y: newY, boothThickness: Math.max(2, Math.round(th * scale)) };
+            }
+            return { ...t, chairVariant: variant };
+          }
+          return t;
+        })
+      };
+      setLayout(updated);
+      if (interactionLayout) setInteractionLayout(updated);
+    } else if (action === 'delete') {
+      deleteSelectedElements(contextMenuSelection.length > 0 ? contextMenuSelection : selectedElements);
     }
     setShowContextMenu(false);
+    setContextMenuSelection([]);
+    setContextMenuTargetTableId(null);
+  };
+
+  // Resolve number conflict popup actions
+  const resolveNumberConflict = (action: 'duplicate' | 'shift' | 'cancel') => {
+    if (!numberConflict) return;
+    const { tableId, desiredNumber } = numberConflict;
+    const clamped = Math.min(999, Math.max(1, desiredNumber));
+    
+    if (action === 'cancel') {
+      setNumberConflict(null);
+      return;
+    }
+    
+    if (action === 'duplicate') {
+      // Just set this table's number to desiredNumber
+      setLayout({
+        ...layout,
+        tables: layout.tables.map(t => 
+          t.id === tableId ? { ...t, number: clamped, name: `${clamped}` } : t
+        )
+      });
+      setNumberConflict(null);
+      return;
+    }
+    
+    if (action === 'shift') {
+      // Shift all other tables with number >= desiredNumber by +1 across ALL zones, except chairs
+      // Current zone
+      const updatedCurrentTables = layout.tables.map(t => {
+        if (t.id === tableId) return { ...t, number: clamped, name: `${clamped}` };
+        if (t.type === 'chair') return t;
+        const n = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
+        if (n !== null && n >= clamped) {
+          return { ...t, number: Math.min(999, n + 1), name: `${Math.min(999, n + 1)}` };
+        }
+        return t;
+      });
+      
+      setLayout({ ...layout, tables: updatedCurrentTables });
+      
+      // Update helper next number to first currently free
+      // Build used numbers set
+      const used = new Set<number>();
+      const allTablesAcrossZones = [
+        ...updatedCurrentTables,
+        ...Object.values(zoneLayouts || {}).flatMap((l: any) => l?.tables || [])
+      ];
+      allTablesAcrossZones.forEach((t: any) => {
+        if (t && t.type !== 'chair' && typeof t.number === 'number' && isFinite(t.number)) {
+          used.add(t.number);
+        }
+      });
+      let nextFree = 1;
+      for (let i = 1; i <= 999; i++) {
+        if (!used.has(i)) { nextFree = i; break; }
+      }
+      setNextAutoTableNumber(nextFree);
+      setNumberConflict(null);
+      return;
+    }
   };
 
   // Handle canvas click
@@ -3172,6 +4868,21 @@ const Canvas: React.FC<CanvasProps> = ({
   const handleElementClick = (e: React.MouseEvent, elementId: string) => {
     e.stopPropagation();
     if (!isEditing) return;
+    // Disable element selection while editing a table number
+    if (editingTableId) return;
+    
+    // Prevent selecting a locked chair alone; select its parent table instead
+    try {
+      const current = interactionLayout || layout;
+      const chair = (current.tables || []).find((t: any) => t.id === elementId && t.type === 'chair');
+      if (chair && chair.attachedToTableId) {
+        const parent = (current.tables || []).find((t: any) => t.id === chair.attachedToTableId && t.type !== 'chair');
+        if (parent) {
+          // Replace selection intent with the parent (and its chairs via expansion below)
+          elementId = parent.id;
+        }
+      }
+    } catch {}
     
     // Don't handle element clicks during group operations to prevent selection reset
     if (isGroupScaling || isGroupRotating) {
@@ -3208,23 +4919,30 @@ const Canvas: React.FC<CanvasProps> = ({
     }
 
     // Handle selection logic when on select tool
+    const expandWithAttachedChairs = (ids: string[]) => {
+      const current = interactionLayout || layout;
+      const selectedSet = new Set(ids);
+      // For every selected TABLE include its attached chairs
+      const parents = (current.tables || []).filter(t => t && t.type !== 'chair' && selectedSet.has(t.id));
+      if (parents.length > 0) {
+        const attached = (current.tables || []).filter(t => t?.type === 'chair' && parents.some(tb => t.attachedToTableId === tb.id)).map(t => t.id);
+        attached.forEach(id => selectedSet.add(id));
+      }
+      return Array.from(selectedSet);
+    };
+
     if (e.shiftKey || isShiftPressed) {
       // Toggle selection - preserve group rotation for consistent selection
-      setSelectedElements(prev => {
-        const newSelection = prev.includes(elementId)
-          ? prev.filter(id => id !== elementId)
-          : [...prev, elementId];
-        // Only reset group rotation if we're selecting completely different elements
-        if (newSelection.length > 0 && prev.length > 0) {
-          const hasCommonElements = newSelection.some(id => prev.includes(id));
-          if (!hasCommonElements) {
-            setGroupTotalRotation(0); // Reset only when selecting completely different group
-          }
-        } else if (newSelection.length === 0) {
-          setGroupTotalRotation(0); // Reset when deselecting all
-        }
-        return newSelection;
-      });
+      const prev = selectedElements;
+      const base = prev.includes(elementId) ? prev.filter(id => id !== elementId) : [...prev, elementId];
+      const expanded = expandWithAttachedChairs(base);
+      if (expanded.length > 0 && prev.length > 0) {
+        const hasCommonElements = expanded.some(id => prev.includes(id));
+        if (!hasCommonElements) setGroupTotalRotation(0);
+      } else if (expanded.length === 0) {
+        setGroupTotalRotation(0);
+      }
+      setSelectedElements(expanded);
     } else {
       // Single selection - only reset group rotation if selecting different element
       const currentSelection = selectedElements;
@@ -3237,7 +4955,11 @@ const Canvas: React.FC<CanvasProps> = ({
 
   // Handle drag start
   const handleDragStart = (e: React.MouseEvent, elementId?: string) => {
+  // Only left button initiates drag/select operations
+  if ((e as any).button !== 0) return;
     if (!isEditing) return;
+    // Disable dragging while editing a table number
+    if (editingTableId) return;
     
     // Reset drag flag at the beginning of potential drag operation
     wasElementDragged.current = false;
@@ -3273,6 +4995,15 @@ const Canvas: React.FC<CanvasProps> = ({
     
     // For normal selection/dragging on elements, stop propagation to prevent marquee selection
     if (elementId) {
+      // If starting drag on a locked chair, redirect to its parent table to avoid detaching
+      try {
+        const current = interactionLayout || layout;
+        const chair = (current.tables || []).find((t: any) => t.id === elementId && t.type === 'chair');
+        if (chair && chair.attachedToTableId) {
+          const parent = (current.tables || []).find((t: any) => t.id === chair.attachedToTableId && t.type !== 'chair');
+          if (parent) elementId = parent.id;
+        }
+      } catch {}
       e.stopPropagation();
       // Don't preventDefault when shift is pressed to allow onClick to fire
       if (!e.shiftKey && !isShiftPressed) {
@@ -3290,11 +5021,38 @@ const Canvas: React.FC<CanvasProps> = ({
     }
     
     // Save the selection that will be used for dragging
-    const selectionForDrag = elementId && currentSelection.includes(elementId) 
+    let selectionForDrag = elementId && currentSelection.includes(elementId) 
       ? currentSelection  // Use current group if element is part of it
       : elementId ? [elementId] : currentSelection; // Use single element or current selection
     
-    setSelectedElementsBeforeDrag(selectionForDrag);
+    // If dragging starts from a table, compute an internal drag group with its attached chairs (without changing visual selection)
+    try {
+      const current = interactionLayout || layout;
+      const set = new Set(selectionForDrag);
+      // If a specific element is targeted, ensure chairs follow
+      if (elementId) {
+        const el = (current.tables || []).find((t: any) => t.id === elementId);
+        if (el && el.type !== 'chair') {
+          (current.tables || []).forEach((t: any) => {
+            if (t && t.type === 'chair' && t.attachedToTableId === el.id) set.add(t.id);
+          });
+        }
+      }
+      // Additionally, for any tables already in selection, include their chairs
+      (current.tables || []).forEach((t: any) => {
+        if (t && t.type !== 'chair' && set.has(t.id)) {
+          (current.tables || []).forEach((c: any) => {
+            if (c && c.type === 'chair' && c.attachedToTableId === t.id) set.add(c.id);
+          });
+        }
+      });
+      selectionForDrag = Array.from(set);
+      // Do NOT reflect expanded selection in UI; keep visual selection minimal (only the table)
+    } catch {}
+    
+    // Store the visual selection we want to restore after drag (minimal UI selection)
+    const visualSelectionToRestore = (elementId && !currentSelection.includes(elementId)) ? [elementId] : currentSelection;
+    setSelectedElementsBeforeDrag(visualSelectionToRestore);
     
     // Get mouse position
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -3331,6 +5089,21 @@ const Canvas: React.FC<CanvasProps> = ({
   const handleRotationStart = (e: React.MouseEvent, elementId: string) => {
     e.stopPropagation();
     if (!isEditing || selectedTool !== 'select') return;
+    // Disable rotation while editing a table number
+    if (editingTableId) return;
+    
+    // If rotating a locked table, rotate it together with its attached chairs (group rotation)
+    try {
+      const current = interactionLayout || layout;
+      const tbl = (current.tables || []).find((t: any) => t.id === elementId && t.type !== 'chair');
+      if (tbl && tbl.chairsLocked) {
+        const groupIds = [tbl.id, ...(current.tables || []).filter((c: any) => c.type === 'chair' && c.attachedToTableId === tbl.id).map((c: any) => c.id)];
+        setSelectedElements(groupIds);
+        // Defer to group rotation start to ensure bounds and centers are correct
+        setTimeout(() => handleGroupRotationStart(e), 0);
+        return;
+      }
+    } catch {}
     
     // Ensure the element is selected
     if (!selectedElements.includes(elementId)) {
@@ -3444,6 +5217,12 @@ const Canvas: React.FC<CanvasProps> = ({
     const currentLayout = interactionLayout || layout;
     const table = currentLayout.tables?.find(t => t.id === tableId);
     if (!table) return;
+    // Disallow resizing chairs entirely (chairs are controlled only via Add Seats)
+    if (table.type === 'chair') return;
+    // Prevent side-only resizing for circular tables to avoid distortion
+    if (table.type === 'circle' && (handle === 't' || handle === 'r' || handle === 'b' || handle === 'l')) {
+      return;
+    }
     
     setSelectedElements([tableId]);
     setIsResizingTable(true);
@@ -3464,12 +5243,42 @@ const Canvas: React.FC<CanvasProps> = ({
   };
   
   // Text resize functionality removed - texts are resized via font size controls in toolbar
-
+ 
+  // Detect if current multi-selection is exactly one non-chair table and ONLY its attached chairs.
+  // Returns the parent table id if true, otherwise null.
+  const getParentIdIfSelectionIsParentWithOwnChairs = (): string | null => {
+    try {
+      const currentLayout = interactionLayout || layout;
+      const selectedTables = (currentLayout.tables || []).filter(t => selectedElements.includes(t.id));
+      const parents = selectedTables.filter(t => t && t.type !== 'chair');
+      if (parents.length !== 1) return null;
+      const parent = parents[0];
+      const others = selectedTables.filter(t => t.id !== parent.id);
+      if (others.length === 0) return null;
+      const allOthersAreParentChairs = others.every(t => t && t.type === 'chair' && (t as any).attachedToTableId === parent.id);
+      return allOthersAreParentChairs ? parent.id : null;
+    } catch {
+      return null;
+    }
+  };
+ 
   // Handle group scaling start
   const handleGroupScaleStart = (e: React.MouseEvent, handle: 'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l') => {
     e.stopPropagation();
     e.preventDefault();
     if (!isEditing || selectedTool !== 'select' || selectedElements.length === 0) return;
+    
+    // If selection corresponds to a circular table with its chairs, block side-only scaling.
+    try {
+      const currentLayout = interactionLayout || layout;
+      const selectedTables = (currentLayout.tables || []).filter(t => selectedElements.includes(t.id));
+      const nonChairs = selectedTables.filter(t => t && t.type !== 'chair');
+      const isCircleSelection = nonChairs.length === 1 && nonChairs[0].type === 'circle' &&
+        selectedTables.filter(t => t.id !== nonChairs[0].id).every(t => t.type === 'chair' && (t as any).attachedToTableId === nonChairs[0].id);
+      if (isCircleSelection && (handle === 't' || handle === 'r' || handle === 'b' || handle === 'l')) {
+        return; // ignore side handles
+      }
+    } catch {}
     
     setHasGroupMoved(false); // Reset movement tracking
 
@@ -3487,7 +5296,9 @@ const Canvas: React.FC<CanvasProps> = ({
       if (table) {
         groupScaleInitialStates.current[id] = { x: table.x, y: table.y, width: table.width || 100, height: table.height || 100 };
       } else if (text) {
-        groupScaleInitialStates.current[id] = { x: text.x, y: text.y, width: text.width || 200, height: text.height || 30 };
+        // Use measured size and store initial font size for proper scaling
+        const measured = getTextSize(text.text, text.fontSize || 16);
+        groupScaleInitialStates.current[id] = { x: text.x, y: text.y, width: measured.width, height: measured.height, fontSize: text.fontSize || 16 };
       }
       // Note: walls use x1,y1,x2,y2,thickness so they'll be handled through originalElementStates
     });
@@ -3517,7 +5328,6 @@ const Canvas: React.FC<CanvasProps> = ({
     
     setOriginalElementStates(elementStates);
   };
-
   // Handle group rotation start
   const handleGroupRotationStart = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -3658,42 +5468,623 @@ const Canvas: React.FC<CanvasProps> = ({
     // Find the table in current layout
     const table = layout.tables?.find(t => t.id === editingTableId);
     
-    if (!table || isNaN(newNumber) || newNumber <= 0) {
+    if (!table || isNaN(newNumber)) {
         setEditingTableId(null);
         setTableNameInput('');
         return;
     }
 
-    // Reorder numbers within the current zone by inserting this table at the desired position.
-    // Clamp position to [1, tablesCount]
-    const tablesCount = layout.tables.length;
-    const targetPos = Math.max(1, Math.min(newNumber, tablesCount));
+    // Clamp to [1..999]
+    const clamped = Math.min(999, Math.max(1, newNumber));
     
-    // Sort tables by their current number to get stable order
-    const ordered = [...layout.tables].sort((a, b) => a.number - b.number);
-    // Remove the edited table from the ordered list
-    const withoutEdited = ordered.filter(t => t.id !== editingTableId);
-    // Insert at new position (targetPos - 1)
-    withoutEdited.splice(targetPos - 1, 0, table);
-    // Build mapping id -> newNumber based on new order
-    const idToNewNumber: Record<string, number> = {};
-    withoutEdited.forEach((t, idx) => {
-      idToNewNumber[t.id] = idx + 1;
-    });
+    // Check for conflict against ALL zones (ignore chairs)
+    const allTablesAcrossZones = [
+      ...(layout.tables || []),
+      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
+    ];
+    const conflictExists = allTablesAcrossZones.some(t =>
+      t &&
+      t.id !== editingTableId &&
+      t.type !== 'chair' &&
+      typeof t.number === 'number' &&
+      isFinite(t.number) &&
+      t.number === clamped
+    );
     
-    const resequencedTables = layout.tables.map(t => ({
-      ...t,
-      number: idToNewNumber[t.id],
-      name: `${idToNewNumber[t.id]}`
-    }));
+    if (conflictExists) {
+      if (numberingPolicy === 'autoShift') {
+        // Auto shift others in CURRENT zone
+        const updatedCurrentTables = layout.tables.map(t => {
+          if (t.id === editingTableId) return { ...t, number: clamped, name: `${clamped}` };
+          if (t.type === 'chair') return t;
+          const n = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
+          if (n !== null && n >= clamped) {
+            return { ...t, number: Math.min(999, n + 1), name: `${Math.min(999, n + 1)}` };
+          }
+          return t;
+        });
+        setLayout({ ...layout, tables: updatedCurrentTables });
+        setEditingTableId(null);
+        setTableNameInput('');
+        return;
+      } else if (numberingPolicy === 'allowDuplicates') {
+        // Allow duplicate
+        const updatedTables = layout.tables.map(t =>
+          t.id === editingTableId ? { ...t, number: clamped, name: `${clamped}` } : t
+        );
+        setLayout({ ...layout, tables: updatedTables });
+        setEditingTableId(null);
+        setTableNameInput('');
+        return;
+      } else {
+        // Fallback: show popup if policy is not recognized
+        setNumberConflict({ tableId: editingTableId, desiredNumber: clamped });
+        setEditingTableId(null);
+        setTableNameInput('');
+        return;
+      }
+    }
     
-    setLayout({
-      ...layout,
-      tables: resequencedTables
-    });
-    
+    // No conflict: apply number directly
+    const updatedTables = layout.tables.map(t =>
+      t.id === editingTableId ? { ...t, number: clamped, name: `${clamped}` } : t
+    );
+    setLayout({ ...layout, tables: updatedTables });
     setEditingTableId(null);
     setTableNameInput('');
+  };
+
+  // Lightweight inline countdown for time left until reservation time
+  const InlineCountdown: React.FC<{ reservationDate: string; reservationTime: string; }> = ({ reservationDate, reservationTime }) => {
+    const [timeLeft, setTimeLeft] = useState('');
+
+    useEffect(() => {
+      let interval: NodeJS.Timeout | undefined;
+
+      const update = () => {
+        try {
+          const reservationDateTime = new Date(`${reservationDate}T${reservationTime}`);
+          const now = new Date();
+          const diffMs = reservationDateTime.getTime() - now.getTime();
+          if (diffMs > 0) {
+            const totalMinutes = Math.floor(diffMs / (1000 * 60));
+            const totalHours = Math.floor(totalMinutes / 60);
+            const days = Math.floor(totalHours / 24);
+            const hours = totalHours % 24;
+            const minutes = totalMinutes % 60;
+            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+            // Single-unit compact display to avoid wrapping
+            if (days > 0) setTimeLeft(`${days}d`);
+            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
+            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
+            else setTimeLeft(`${seconds}s`);
+          } else {
+            // Keep showing 0s when expired
+            setTimeLeft('0s');
+            if (interval) clearInterval(interval);
+          }
+        } catch {
+          setTimeLeft('');
+        }
+      };
+
+      update();
+      interval = setInterval(update, 1000);
+      return () => { if (interval) clearInterval(interval); };
+    }, [reservationDate, reservationTime]);
+
+    if (!timeLeft) return null;
+    return <span>{timeLeft}</span>;
+  };
+
+  // Countdown badge: renders the label and applies pulse on expiry
+  const CountdownBadge: React.FC<{ reservationDate: string; reservationTime: string; color: string; }> = ({ reservationDate, reservationTime, color }) => {
+    const [timeLeft, setTimeLeft] = useState('');
+    const [expired, setExpired] = useState(false);
+
+    useEffect(() => {
+      let interval: NodeJS.Timeout | undefined;
+      const update = () => {
+        try {
+          const target = new Date(`${reservationDate}T${reservationTime}`);
+          const now = new Date();
+          const diffMs = target.getTime() - now.getTime();
+          if (diffMs > 0) {
+            const totalMinutes = Math.floor(diffMs / (1000 * 60));
+            const totalHours = Math.floor(totalMinutes / 60);
+            const days = Math.floor(totalHours / 24);
+            const hours = totalHours % 24;
+            const minutes = totalMinutes % 60;
+            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+            setExpired(false);
+            if (days > 0) setTimeLeft(`${days}d`);
+            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
+            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
+            else setTimeLeft(`${seconds}s`);
+          } else {
+            setExpired(true);
+            setTimeLeft('0s');
+            if (interval) clearInterval(interval);
+          }
+        } catch {
+          setExpired(false);
+          setTimeLeft('');
+        }
+      };
+      update();
+      interval = setInterval(update, 1000);
+      return () => { if (interval) clearInterval(interval); };
+    }, [reservationDate, reservationTime]);
+
+    if (!timeLeft) return null;
+    return (
+      <div
+        className={`rounded px-1.5 py-0.5 text-[10px] leading-none shadow ${expired ? 'respoint-glow-pulse-soft' : ''}`}
+        style={{
+          backgroundColor: color,
+          color: '#FFFFFF',
+          border: `1px solid ${color}`,
+          boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+          ['--rp-glow-color' as any]: color
+        }}
+      >
+        {timeLeft}
+      </div>
+    );
+  };
+
+  // Helpers for seated reservations (ARRIVED) - countdown to estimated end
+  const estimateSeatedDurationMinutes = (numGuests?: number) => {
+    const g = typeof numGuests === 'number' ? numGuests : 2;
+    if (g <= 2) return 60;
+    if (g <= 4) return 120;
+    return 150;
+  };
+
+  const SeatedCountdownBadge: React.FC<{ reservation: Reservation; color: string; }> = ({ reservation, color }) => {
+    const [timeLeft, setTimeLeft] = useState('');
+    const [expired, setExpired] = useState(false);
+
+    useEffect(() => {
+      let interval: NodeJS.Timeout | undefined;
+      const update = () => {
+        try {
+          const start = new Date(`${reservation.date}T${reservation.time}`);
+          // default end by estimated duration
+          let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
+          // override from local adjustments if present
+          try {
+            const key = `respoint-duration-adjustments:${reservation.date}`;
+            const raw = localStorage.getItem(key);
+            const parsed = raw ? JSON.parse(raw) : {};
+            const adj = parsed?.[reservation.id];
+            if (adj && typeof adj.end === 'number') {
+              const midnight = new Date(`${reservation.date}T00:00:00`);
+              end = new Date(midnight.getTime() + Math.max(0, Math.min(1440, adj.end)) * 60 * 1000);
+            }
+          } catch {}
+          const now = new Date();
+          const diff = end.getTime() - now.getTime();
+          if (diff > 0) {
+            setExpired(false);
+            const totalMinutes = Math.floor(diff / (1000 * 60));
+            const totalHours = Math.floor(totalMinutes / 60);
+            const days = Math.floor(totalHours / 24);
+            const hours = totalHours % 24;
+            const minutes = totalMinutes % 60;
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            if (days > 0) setTimeLeft(`${days}d`);
+            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
+            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
+            else setTimeLeft(`${seconds}s`);
+          } else {
+            setExpired(true);
+            setTimeLeft('0s');
+            if (interval) clearInterval(interval);
+          }
+        } catch {
+          setExpired(false);
+          setTimeLeft('');
+        }
+      };
+      update();
+      interval = setInterval(update, 1000);
+      return () => { if (interval) clearInterval(interval); };
+    }, [reservation.date, reservation.time, reservation.id, reservation.numberOfGuests]);
+
+    if (!timeLeft) return null;
+    return (
+      <div
+        className={`rounded px-1.5 py-0.5 text-[10px] leading-none shadow ${expired ? 'respoint-glow-pulse-soft' : ''}`}
+        style={{
+          backgroundColor: color,
+          color: '#FFFFFF',
+          border: `1px solid ${color}`,
+          boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+          ['--rp-glow-color' as any]: color
+        }}
+      >
+        {/* Chair icon + time */}
+        <span className="inline-flex items-center gap-1">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M7 3a2 2 0 0 0-2 2v7h2V5h10v7h2V5a2 2 0 0 0-2-2H7z"></path>
+            <path d="M6 14v5h2v-3h8v3h2v-5H6z"></path>
+          </svg>
+          {timeLeft}
+        </span>
+      </div>
+    );
+  };
+
+  // Inner progress stroke (inside table) for seated reservations
+  const SeatedProgressStroke: React.FC<{
+    shape: 'rect' | 'circle';
+    tableWidth: number;
+    tableHeight: number;
+    rotation: number;
+    color: string;
+    reservation: Reservation;
+    gap?: number;
+    strokeWidth?: number;
+    borderRadiusPx?: number;
+  }> = ({ shape, tableWidth, tableHeight, rotation, color, reservation, gap = 4, strokeWidth = 3, borderRadiusPx = 8 }) => {
+    const [progress, setProgress] = useState(0);
+    useEffect(() => {
+      let interval: NodeJS.Timeout | undefined;
+      const update = () => {
+        try {
+          const start = new Date(`${reservation.date}T${reservation.time}`);
+          let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
+          try {
+            const key = `respoint-duration-adjustments:${reservation.date}`;
+            const raw = localStorage.getItem(key);
+            const parsed = raw ? JSON.parse(raw) : {};
+            const adj = parsed?.[reservation.id];
+            if (adj && typeof adj.end === 'number') {
+              const midnight = new Date(`${reservation.date}T00:00:00`);
+              end = new Date(midnight.getTime() + Math.max(0, Math.min(1440, adj.end)) * 60 * 1000);
+            }
+          } catch {}
+          const now = new Date();
+          const p = (now.getTime() - start.getTime()) / Math.max(1, (end.getTime() - start.getTime()));
+          setProgress(Math.max(0, Math.min(1, p)));
+        } catch {
+          setProgress(0);
+        }
+      };
+      update();
+      interval = setInterval(update, 1000);
+      return () => { if (interval) clearInterval(interval); };
+    }, [reservation.date, reservation.time, reservation.id, reservation.numberOfGuests]);
+
+    const isExpired = progress >= 1 - 1e-6;
+
+    // Build dashed strokeDasharray that covers only the visible progress length,
+    // then a single trailing gap to hide the remainder (no repetition).
+    const buildDashedArray = (visibleLen: number, totalLen: number, dashLen: number = 8, gapLen: number = 6) => {
+      let remaining = Math.max(0, Math.min(totalLen, visibleLen));
+      const parts: number[] = [];
+      let acc = 0;
+      while (remaining > 0.5) {
+        const d = Math.min(dashLen, remaining);
+        parts.push(d);
+        acc += d;
+        remaining -= d;
+        if (remaining <= 0.5) break;
+        const g = Math.min(gapLen, remaining);
+        parts.push(g);
+        acc += g;
+        remaining -= g;
+      }
+      const trailingGap = Math.max(0, totalLen - acc);
+      if (trailingGap > 0) parts.push(Math.max(trailingGap, totalLen * 2)); // oversize gap to prevent pattern repetition
+      return parts.join(' ');
+    };
+
+    if (shape === 'rect') {
+      // draw inside the table, respecting gap
+      const drawW = Math.max(0, tableWidth - strokeWidth - 2 * gap);
+      const drawH = Math.max(0, tableHeight - strokeWidth - 2 * gap);
+      const x = (tableWidth - drawW) / 2;
+      const y = (tableHeight - drawH) / 2;
+      const rEff = Math.min(Math.max(0, borderRadiusPx - gap), drawW / 2, drawH / 2);
+      const perimeter = 2 * (drawW + drawH);
+      const visibleLen = Math.max(0, Math.min(perimeter, progress * perimeter));
+      const dashArray = buildDashedArray(visibleLen, perimeter, 3, 5); // dashed progress (unused with mask, kept for reference)
+      const startX = x + drawW / 2;
+      const startY = y;
+      const d = [
+        `M ${startX} ${startY}`,
+        `H ${x + drawW - rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
+        `V ${y + drawH - rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
+        `H ${x + rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
+        `V ${y + rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
+        `H ${startX}`
+      ].join(' ');
+      const maskId = `seated-mask-${reservation.id}-rect`;
+      return (
+        <div className="absolute inset-0 pointer-events-none"
+             style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
+          <svg width={tableWidth} height={tableHeight}>
+            <defs>
+              <mask id={maskId}>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke="white"
+                  strokeWidth={strokeWidth + 1}
+                  pathLength={perimeter as unknown as number}
+                  strokeDasharray={`${perimeter} ${perimeter}`}
+                  strokeDashoffset={Math.max(0, perimeter - visibleLen)}
+                  strokeLinecap="butt"
+                />
+              </mask>
+            </defs>
+            {/* Base dashed track */}
+            <path d={d} fill="none" stroke={color} strokeOpacity={0.25} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="butt" />
+            {/* Masked dashed progress */}
+            <path d={d} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="round" mask={`url(#${maskId})`} className={isExpired ? 'respoint-stroke-pulse' : undefined} />
+          </svg>
+        </div>
+      );
+    }
+    // circle
+    const rx = Math.max(2, tableWidth / 2 - gap - strokeWidth / 2);
+    const ry = Math.max(2, tableHeight / 2 - gap - strokeWidth / 2);
+    const cx = tableWidth / 2;
+    const cy = tableHeight / 2;
+    const circumference = 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
+    const visibleLen = Math.max(0, Math.min(circumference, progress * circumference));
+    const dashArray = buildDashedArray(visibleLen, circumference, 3, 5);
+    const maskIdCircle = `seated-mask-${reservation.id}-circle`;
+    return (
+      <div className="absolute inset-0 pointer-events-none"
+           style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
+        <svg width={tableWidth} height={tableHeight}>
+          <defs>
+            <mask id={maskIdCircle}>
+              <ellipse
+                cx={cx}
+                cy={cy}
+                rx={rx}
+                ry={ry}
+                fill="none"
+                stroke="white"
+                strokeWidth={strokeWidth + 1}
+                pathLength={circumference as unknown as number}
+                strokeDasharray={`${circumference} ${circumference}`}
+                strokeDashoffset={Math.max(0, circumference - visibleLen)}
+                transform={`rotate(-90 ${cx} ${cy})`}
+                strokeLinecap="butt"
+              />
+            </mask>
+          </defs>
+          {/* Base dashed track */}
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={color} strokeOpacity={0.25} strokeWidth={strokeWidth} strokeDasharray="3 5" transform={`rotate(-90 ${cx} ${cy})`} />
+          {/* Masked dashed progress */}
+          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} mask={`url(#${maskIdCircle})`} className={isExpired ? 'respoint-stroke-pulse' : undefined} />
+        </svg>
+      </div>
+    );
+  };
+  // Outer progress stroke around table (outside with gap), filling as time approaches
+  const ProgressStroke: React.FC<{
+    shape: 'rect' | 'circle';
+    tableWidth: number;
+    tableHeight: number;
+    rotation: number;
+    color: string;
+    reservationDate: string;
+    reservationTime: string;
+    createdAt?: string;
+    gap?: number; // space between table edge and stroke
+    strokeWidth?: number;
+    windowMinutes?: number; // fallback window if createdAt missing
+    borderRadiusPx?: number; // for rect shape, match table rounding
+  }> = ({
+    shape,
+    tableWidth,
+    tableHeight,
+    rotation,
+    color,
+    reservationDate,
+    reservationTime,
+    createdAt,
+    gap = 4,
+    strokeWidth = 4,
+    windowMinutes = 60,
+    borderRadiusPx = 8
+  }) => {
+    const [progress, setProgress] = useState(0);
+
+    useEffect(() => {
+      let interval: NodeJS.Timeout | undefined;
+
+      const update = () => {
+        try {
+          const target = new Date(`${reservationDate}T${reservationTime}`);
+          const now = new Date();
+          if (isNaN(target.getTime())) { setProgress(0); return; }
+
+          // Determine start time: reservation createdAt if provided, otherwise fallback (windowMinutes before target)
+          const start = createdAt ? new Date(createdAt) : new Date(target.getTime() - windowMinutes * 60 * 1000);
+          const startMs = start.getTime();
+          const endMs = target.getTime();
+
+          if (!isFinite(startMs) || startMs >= endMs) {
+            // Fallback to last windowMinutes if createdAt invalid or after target
+            const fallbackStart = new Date(target.getTime() - windowMinutes * 60 * 1000);
+            const p =
+              now.getTime() <= fallbackStart.getTime() ? 0 :
+              now.getTime() >= endMs ? 1 :
+              (now.getTime() - fallbackStart.getTime()) / (endMs - fallbackStart.getTime());
+            setProgress(Math.max(0, Math.min(1, p)));
+            return;
+          }
+
+          // Progress from creation time until arrival time
+          const p =
+            now.getTime() <= startMs ? 0 :
+            now.getTime() >= endMs ? 1 :
+            (now.getTime() - startMs) / (endMs - startMs);
+          setProgress(Math.max(0, Math.min(1, p)));
+        } catch {
+          setProgress(0);
+        }
+      };
+
+      update();
+      interval = setInterval(update, 1000);
+      return () => { if (interval) clearInterval(interval); };
+    }, [reservationDate, reservationTime, createdAt, windowMinutes]);
+
+    const isExpired = progress >= 1 - 1e-6;
+
+    // Container grows to sit outside the table by gap + half stroke each side
+    const outerPad = gap + strokeWidth;
+    const containerW = tableWidth + outerPad * 2;
+    const containerH = tableHeight + outerPad * 2;
+
+    // We rotate the whole overlay to align with the table orientation
+    // The inner SVG coordinates remain unrotated and we draw at (strokeWidth/2) margin.
+
+    if (shape === 'rect') {
+      const drawW = containerW - strokeWidth;
+      const drawH = containerH - strokeWidth;
+      // Effective corner radius applied on the ring (clamped to valid rect radius constraints)
+      const rEff = Math.min(Math.max(0, borderRadiusPx + gap), drawW / 2, drawH / 2);
+      // Build a path that starts at the middle of the top edge and goes clockwise
+      const x = strokeWidth / 2;
+      const y = strokeWidth / 2;
+      const startX = x + drawW / 2;
+      const startY = y;
+      const d = [
+        `M ${startX} ${startY}`,
+        `H ${x + drawW - rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
+        `V ${y + drawH - rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
+        `H ${x + rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
+        `V ${y + rEff}`,
+        `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
+        `H ${startX}`
+      ].join(' ');
+
+      return (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            transform: `rotate(${rotation}deg)`,
+            transformOrigin: 'center',
+            left: -outerPad,
+            top: -outerPad,
+            width: containerW,
+            height: containerH
+          }}
+        >
+          <svg width={containerW} height={containerH}>
+            {/* Base track (always full ring) */}
+            <rect
+              x={strokeWidth / 2}
+              y={strokeWidth / 2}
+              width={drawW}
+              height={drawH}
+              rx={Math.max(0, borderRadiusPx + gap)}
+              ry={Math.max(0, borderRadiusPx + gap)}
+              fill="none"
+              stroke={color}
+              strokeOpacity={0.25}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+            />
+            <path
+              d={d}
+              fill="none"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              pathLength={1 as any}
+              strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
+              strokeLinecap="round"
+              className={isExpired ? 'respoint-stroke-pulse' : undefined}
+            />
+          </svg>
+          {isExpired ? (
+            <div
+              className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
+              style={{
+                borderRadius: Math.max(0, (borderRadiusPx + gap + strokeWidth / 2)),
+                zIndex: 9998,
+                ['--rp-glow-color' as any]: color
+              }}
+            />
+          ) : null}
+        </div>
+      );
+    }
+
+    // circle (ellipse) ring
+    const rx = tableWidth / 2 + gap + strokeWidth / 2;
+    const ry = tableHeight / 2 + gap + strokeWidth / 2;
+    const cx = containerW / 2;
+    const cy = containerH / 2;
+    // Use pathLength normalization to express progress 0..1 and rotate so start is at 12 o'clock
+
+    return (
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          transform: `rotate(${rotation}deg)`,
+          transformOrigin: 'center',
+          left: -outerPad,
+          top: -outerPad,
+          width: containerW,
+          height: containerH
+        }}
+      >
+        <svg width={containerW} height={containerH}>
+          {/* Base track (always full ring) */}
+          <ellipse
+            cx={cx}
+            cy={cy}
+            rx={rx}
+            ry={ry}
+            fill="none"
+            stroke={color}
+            strokeOpacity={0.25}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${cx} ${cy})`}
+            pathLength={1 as any}
+          />
+          <ellipse
+            cx={cx}
+            cy={cy}
+            rx={rx}
+            ry={ry}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            pathLength={1 as any}
+            strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${cx} ${cy})`}
+            className={isExpired ? 'respoint-stroke-pulse' : undefined}
+          />
+        </svg>
+        {isExpired ? (
+          <div
+            className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
+            style={{ borderRadius: '9999px', zIndex: 9998, ['--rp-glow-color' as any]: color }}
+          />
+        ) : null}
+      </div>
+    );
   };
 
   // Render table
@@ -3704,22 +6095,103 @@ const Canvas: React.FC<CanvasProps> = ({
     const height = table.height || 100;
     const rotation = table.rotation || 0;
     
-    // Find reservation for this table on the selected date - check all zones
-    const reservationForTable = reservations.find(r => {
+    // Helper: robust check if reservation's table_ids contain this table (by id, name or number)
+    const doesReservationIncludeTable = (rawIds: any[] | undefined | null, tbl: any): boolean => {
+      const normalize = (v: any) => String(v ?? '').trim().toLowerCase();
+      const ids = (rawIds || []).map((x: any) => normalize(x));
+      if (ids.length === 0) return false;
+      const tableId = normalize(tbl.id);
+      const tableName = tbl.name != null ? normalize(tbl.name) : '';
+      const tableNumberStr = (typeof tbl.number !== 'undefined' && tbl.number !== null) ? normalize(String(tbl.number)) : '';
+      // Exact string matches
+      if (ids.includes(tableId) || (tableName && ids.includes(tableName)) || (tableNumberStr && ids.includes(tableNumberStr))) {
+        return true;
+      }
+      // Numeric equivalence (handles cases like ' 1', '01', 'table 1')
+      const tblNum = (typeof tbl.number === 'number' && isFinite(tbl.number)) ? tbl.number : null;
+      if (tblNum !== null) {
+        for (const id of ids) {
+          const match = id.match(/\d+/);
+          if (match && parseInt(match[0], 10) === tblNum) {
+            return true;
+          }
+        }
+      }
+      // Fallback: map reservation IDs back to tables from zoneLayouts and compare numbers/names
+      try {
+        const allTables = Object.values(zoneLayouts || {}).flatMap(l => l?.tables || []);
+        if (allTables.length > 0) {
+          const byId: Record<string, any> = {};
+          for (const t of allTables) {
+            byId[normalize(t.id)] = t;
+          }
+          for (const id of ids) {
+            const t = byId[id];
+            if (t) {
+              const tName = t.name != null ? normalize(t.name) : '';
+              const tNumStr = (typeof t.number !== 'undefined' && t.number !== null) ? normalize(String(t.number)) : '';
+              if ((tName && tName === tableName) || (tNumStr && tNumStr === tableNumberStr)) {
+                return true;
+              }
+              // Also numeric equivalence between mapped table's number and current table's number
+              const mappedNum = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
+              if (mappedNum !== null && tblNum !== null && mappedNum === tblNum) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch {}
+      return false;
+    };
+    
+    // Find reservation for this table on the selected date (across all zones)
+    // Never associate reservations to chairs for hover/labels
+    const reservationForTable = table.type === 'chair' ? null : reservations.find(r => {
       const reservationDate = new Date(r.date);
       const calendarDate = selectedDate || new Date();
-      return r.tableIds?.includes(table.id) && 
-             reservationDate.getFullYear() === calendarDate.getFullYear() &&
-             reservationDate.getMonth() === calendarDate.getMonth() &&
-             reservationDate.getDate() === calendarDate.getDate() &&
-             // Only show active reservations (waiting and confirmed)
-             (r.status === 'waiting' || r.status === 'confirmed');
+      // Same day check
+      const sameDay =
+        reservationDate.getFullYear() === calendarDate.getFullYear() &&
+        reservationDate.getMonth() === calendarDate.getMonth() &&
+        reservationDate.getDate() === calendarDate.getDate();
+      if (!sameDay) return false;
+      // Only show active reservations (waiting and confirmed)
+      if (!(r.status === 'waiting' || r.status === 'confirmed')) return false;
+      // Robust match against table ids/names/numbers
+      return doesReservationIncludeTable(r.tableIds as any[], table);
     });
 
-    // If this reservation spans multiple tables, only display waiter labels on the first table id to avoid duplicates
-    const isPrimaryTableForReservation = reservationForTable ? reservationForTable.tableIds && reservationForTable.tableIds[0] === table.id : false;
+    // Detect ARRIVED reservation for this table (for seated highlight)
+    const arrivedReservationForTable = table.type === 'chair' ? null : reservations.find(r => {
+      const reservationDate = new Date(r.date);
+      const calendarDate = selectedDate || new Date();
+      const sameDay =
+        reservationDate.getFullYear() === calendarDate.getFullYear() &&
+        reservationDate.getMonth() === calendarDate.getMonth() &&
+        reservationDate.getDate() === calendarDate.getDate();
+      if (!sameDay) return false;
+      if (r.status !== 'arrived') return false;
+      return doesReservationIncludeTable(r.tableIds as any[], table);
+    });
+
+    // If this reservation spans multiple tables, only display waiter labels on a single primary table to avoid duplicates
+    const isPrimaryTableForReservation = reservationForTable
+      ? (() => {
+          const arr = (reservationForTable.tableIds || []) as any[];
+          if (!arr || arr.length === 0) return false;
+          // Use the same robust comparison for the first entry
+          return doesReservationIncludeTable([arr[0]], table);
+        })()
+      : false;
     
     const tableColor = reservationForTable ? reservationForTable.color : (table.color || '#FFFFFF');
+    const arrivedColor = arrivedReservationForTable?.color || undefined;
+    const hoverableReservation = reservationForTable || arrivedReservationForTable;
+    // Waiting status color (fallback to orange if reservation color missing)
+    const waitingColor = (reservationForTable && reservationForTable.status === 'waiting')
+      ? (reservationForTable.color || '#f97316')
+      : undefined;
     
     // Determine cursor based on tool and state
     let cursor = 'cursor-pointer';
@@ -3736,10 +6208,56 @@ const Canvas: React.FC<CanvasProps> = ({
     const waiterListForReservation = reservationForTable && isPrimaryTableForReservation ? getAssignedWaiters(reservationForTable.id) : [] as string[];
     const hasWaiterLabels = waiterListForReservation && (waiterListForReservation as any).length > 0;
 
+    const showVipStar = Boolean(reservationForTable?.isVip || arrivedReservationForTable?.isVip);
+
+    // Elevate z-index for the table that actually renders the countdown label (group leader or single)
+    let elevateForLabel = false;
+    if (waitingColor && reservationForTable?.date && reservationForTable?.time && table.type !== 'chair') {
+      try {
+        const currentTables = ((interactionLayout || layout).tables || []).filter((t: any) => t && t.type !== 'chair');
+        const grouped = currentTables.filter((t: any) => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
+        if (grouped.length > 1) {
+          const eps = 2;
+          const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+          const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+          const touch = (a: any, b: any) => {
+            const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+            const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+            const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+            return horizontalTouch || verticalTouch || overlap;
+          };
+          const rects = grouped.map(getRect);
+          const startRect = getRect(table);
+          const visited: any = { [startRect.id]: true };
+          const queue: any[] = [startRect];
+          const component: any[] = [startRect];
+          while (queue.length) {
+            const cur = queue.shift();
+            for (const r of rects) {
+              if (!visited[r.id] && touch(cur, r)) {
+                visited[r.id] = true;
+                queue.push(r);
+                component.push(r);
+              }
+            }
+          }
+          if (component.length > 1) {
+            const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+            if (leaderRect && table.id === leaderRect.id) {
+              elevateForLabel = true;
+            }
+          } else {
+            elevateForLabel = true;
+          }
+        } else {
+          elevateForLabel = true;
+        }
+      } catch {}
+    }
     return (
       <div
         key={table.id}
-        className={`absolute transition-none ${isHovered && !isSelected && isEditing ? 'ring-2 ring-blue-300' : ''} ${cursor}`}
+        className={`absolute transition-none ${isHovered && !isSelected && isEditing && table.type !== 'chair' ? 'ring-2 ring-blue-300' : ''} ${cursor}`}
         style={{
           left: `${table.x}px`,
           top: `${table.y}px`,
@@ -3747,7 +6265,7 @@ const Canvas: React.FC<CanvasProps> = ({
           height: `${height}px`,
           transform: `rotate(${rotation}deg)`,
           transformOrigin: 'center',
-          zIndex: isSelected ? 10 : (hasWaiterLabels ? 20 : 1)
+          zIndex: elevateForLabel ? 150 : (isSelected ? 10 : (hasWaiterLabels ? 20 : (table.type === 'chair' ? 2 : 1)))
         }}
         onMouseDown={(e) => handleDragStart(e, table.id)}
         onClick={(e) => handleElementClick(e, table.id)}
@@ -3782,6 +6300,7 @@ const Canvas: React.FC<CanvasProps> = ({
               setAssignedWaiter(reservationForTable.id, name);
               try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name } })); } catch {}
             }
+            setIsWaiterDragActive(false);
           } catch {}
         }}
         onContextMenu={(e) => {
@@ -3791,14 +6310,17 @@ const Canvas: React.FC<CanvasProps> = ({
         }}
         onMouseEnter={(e) => {
           setHoveredElementId(table.id);
-          if (reservationForTable && !isEditing) {
+          if (hoverableReservation && !isEditing && table.type !== 'chair') {
             const rect = canvasRef.current!.getBoundingClientRect();
             const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
             setHoveredTable({
               tableId: table.id,
-              reservation: reservationForTable,
+              reservation: hoverableReservation,
               position: { x: canvasX, y: canvasY }
             });
+          } else {
+            // Clear any previous hover when entering chairs or non-reserved tables
+            setHoveredTable(null);
           }
         }}
         onMouseLeave={() => {
@@ -3809,36 +6331,410 @@ const Canvas: React.FC<CanvasProps> = ({
           if (hoveredTable && hoveredTable.tableId === table.id && !isEditing) {
             const rect = canvasRef.current!.getBoundingClientRect();
             const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
-            setHoveredTable(prev => prev ? ({ ...prev, position: { x: canvasX, y: canvasY } }) : null);
+            if (hoverRafRef.current == null) {
+              hoverRafRef.current = requestAnimationFrame(() => {
+                setHoveredTable(prev => {
+                  if (!prev) { hoverRafRef.current = null; return null; }
+                  const dx = canvasX - prev.position.x;
+                  const dy = canvasY - prev.position.y;
+                  if ((dx * dx + dy * dy) < 1) { hoverRafRef.current = null; return prev; }
+                  hoverRafRef.current = null;
+                  return ({ ...prev, position: { x: canvasX, y: canvasY } });
+                });
+              });
+            }
           }
         }}
-        onDoubleClick={(e) => handleTableNameDoubleClick(e, table)}
+        onDoubleClick={(e) => {
+          if (table.type !== 'chair') {
+            handleTableNameDoubleClick(e, table);
+          }
+        }}
       >
-        {table.type === 'rectangle' ? (
+        {table.type === 'chair' ? (
+          <>
+            {table.chairVariant === 'barstool' ? (
+              <div className="w-full h-full select-none relative">
+                <div
+                  className="absolute"
+                  style={{
+                    left: '50%',
+                    top: '50%',
+                    width: '70%',
+                    height: '70%',
+                    transform: 'translate(-50%, -50%)',
+                    borderRadius: '9999px',
+                    backgroundColor: table.color || '#ECEFF3',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            ) : (table.chairVariant === 'booth' || table.chairVariant === 'boothCurved') ? (
+              // If arcInnerRatio is provided, render a circular arc hugging the table (for circular tables)
+              ('arcInnerRatio' in (table as any)) ? (
+                <svg className="w-full h-full select-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <defs>
+                    {(() => {
+                      const inner = Math.max(0, Math.min(50, (table as any).arcInnerRatio ?? 42));
+                      const left = 50 - inner;
+                      const right = 50 + inner;
+                      const maskId = `booth-curved-arc-mask-${table.id}`;
+                      return (
+                        <mask id={maskId}>
+                          <rect x="0" y="0" width="100" height="100" fill="black" />
+                          {/* Outer semicircle */}
+                          <path d="M 0 50 A 50 50 0 0 1 100 50 L 0 50 Z" fill="white" />
+                          {/* Inner cut-out semicircle flush to table radius */}
+                          <path d={`M ${left} 50 A ${inner} ${inner} 0 0 1 ${right} 50 L ${left} 50 Z`} fill="black" />
+                        </mask>
+                      );
+                    })()}
+                  </defs>
+                  <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-curved-arc-mask-${table.id})`} />
+                </svg>
+              ) : (
+              <svg className="w-full h-full select-none" viewBox="0 0 100 50" preserveAspectRatio="none">
+                <defs>
+                  {(() => {
+                    const t = 14; // thickness in viewBox units (relative to height 50)
+                    const maskId = `booth-curved-mask-${table.id}`;
+                    return (
+                      <mask id={maskId}>
+                        <rect x="0" y="0" width="100" height="50" fill="black" />
+                        {/* Outer filled semicircle */}
+                        <path d="M 0 50 A 50 50 0 0 1 100 50 L 0 50 Z" fill="white" />
+                        {/* Inner cut-out semicircle */}
+                        <path d={`M ${t} 50 A ${50 - t} ${50 - t} 0 0 1 ${100 - t} 50 L ${t} 50 Z`} fill="black" />
+                      </mask>
+                    );
+                  })()}
+                </defs>
+                <rect x="0" y="0" width="100" height="50" fill={table.color || '#ECEFF3'} mask={`url(#booth-curved-mask-${table.id})`} />
+              </svg>
+              )
+            ) : table.chairVariant === 'boothU' ? (
+              // If arcInnerRatio is provided for U-booth on circular tables, render as a thicker circular arc
+              ('arcInnerRatio' in (table as any)) ? (
+                <svg className="w-full h-full select-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <defs>
+                    {(() => {
+                      const inner = Math.max(0, Math.min(50, (table as any).arcInnerRatio ?? 40));
+                      const left = 50 - inner;
+                      const right = 50 + inner;
+                      const maskId = `booth-u-arc-mask-${table.id}`;
+                      const outer = 50;
+                      // Create a ring by subtracting two semicircles with a larger gap (thicker)
+                      return (
+                        <mask id={maskId}>
+                          <rect x="0" y="0" width="100" height="100" fill="black" />
+                          <path d="M 0 50 A 50 50 0 0 1 100 50 L 0 50 Z" fill="white" />
+                          <path d={`M ${left} 50 A ${inner} ${inner} 0 0 1 ${right} 50 L ${left} 50 Z`} fill="black" />
+                        </mask>
+                      );
+                    })()}
+                  </defs>
+                  <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-u-arc-mask-${table.id})`} />
+                </svg>
+              ) : (
+              <svg className="w-full h-full select-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  {(() => {
+                    const wallPx = (table as any).boothThickness ?? RECT_U_WALL_PX;
+                    const maskId = `booth-u-mask-${table.id}`;
+                    const widthPx = Math.max(1, (table.width || 100));
+                    const heightPx = Math.max(1, (table.height || 100));
+                    // Convert absolute wall thickness (px) to viewBox units (0..100)
+                    const leftW = (wallPx / widthPx) * 100;
+                    const rightW = leftW;
+                    const topH = (wallPx / heightPx) * 100;
+                    return (
+                      <mask id={maskId}>
+                        <rect x="0" y="0" width="100" height="100" fill="black" />
+                        {/* Left arm */}
+                        <rect x="0" y="0" width={leftW} height="100" fill="white" />
+                        {/* Right arm */}
+                        <rect x={100 - rightW} y="0" width={rightW} height="100" fill="white" />
+                        {/* Back segment */}
+                        <rect x="0" y="0" width="100" height={topH} fill="white" />
+                      </mask>
+                    );
+                  })()}
+                </defs>
+                <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-u-mask-${table.id})`} />
+              </svg>
+              )
+            ) : (
           <div
-            className="w-full h-full rounded-lg flex items-center justify-center text-black font-medium shadow-lg select-none"
-            style={{ backgroundColor: tableColor }}
+            className="w-full h-full select-none rounded-lg"
+            style={{
+              backgroundColor: table.color || '#ECEFF3',
+              boxSizing: 'border-box'
+            }}
+          />
+            )}
+          </>
+        ) : table.type === 'rectangle' ? (
+          <div
+            className="w-full h-full rounded-lg flex items-center justify-center text-black font-medium select-none"
+            style={{ backgroundColor: tableColor, boxShadow: '0 0 8px rgba(0,0,0,0.18), 0 0 8px rgba(0,0,0,0.12)' }}
           >
             {editingTableId === table.id ? (
-              <input
-                type="number"
-                value={tableNameInput}
-                onChange={handleTableNameChange}
-                onBlur={handleTableNameSubmit}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleTableNameSubmit(); if (e.key === 'Escape') setEditingTableId(null); }}
-                className="w-full h-full text-center bg-white text-black font-bold text-lg border-4 border-blue-500 rounded-lg outline-none shadow-lg z-[70] hide-number-arrows"
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                min="1"
-              />
+              <div className="w-full h-full bg-white border-4 border-blue-500 rounded-lg outline-none z-[70] relative flex items-center justify-center" style={{ boxShadow: '0 0 16px rgba(0,0,0,0.18), 0 0 8px rgba(0,0,0,0.12)' }}>
+                <input
+                  type="number"
+                  value={tableNameInput}
+                  onChange={handleTableNameChange}
+                  onBlur={handleTableNameSubmit}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTableNameSubmit(); if (e.key === 'Escape') setEditingTableId(null); }}
+                  className="w-full h-full text-center bg-transparent text-black font-bold text-xs outline-none hide-number-arrows"
+                  style={{ transform: `rotate(${-rotation}deg)`, transformOrigin: 'center' }}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  min="1"
+                  max="999"
+                />
+              </div>
             ) : (
               <div style={{ transform: `rotate(${-rotation}deg)`, position: 'relative', width: '100%', height: '100%' }} className="select-none">
-                <div className="w-full h-full flex items-center justify-center text-black font-medium">{table.name}</div>
+                <div className="w-full h-full flex items-center justify-center text-black font-medium text-xs">
+                  <span className="relative inline-flex items-center justify-center">
+                    {/* Lock icon positioned absolutely so number remains centered */}
+                    
+                    {table.name}
+                    {showVipStar ? (
+                      <span className="absolute -top-0.5 -right-3 pointer-events-none">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500">
+                          <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/>
+                        </svg>
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                {/* Removed static dashed table border for seated; only progress ring remains */}
+                {/* Seated (ARRIVED) progress + time inside table */}
+                {arrivedReservationForTable && arrivedColor ? (
+                  <>
+                    <SeatedProgressStroke
+                      shape="rect"
+                      tableWidth={width}
+                      tableHeight={height}
+                      rotation={rotation}
+                      color={arrivedColor}
+                      reservation={arrivedReservationForTable}
+                      gap={4}
+                      strokeWidth={3}
+                      borderRadiusPx={8}
+                    />
+                    {/* top-edge inside label */}
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
+                    >
+                      <div className="absolute" style={{ top: '4px', left: '50%', transform: 'translate(-50%, -60%)' }}>
+                        <SeatedCountdownBadge reservation={arrivedReservationForTable} color={arrivedColor} />
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                {/* Waiting progress ring + top-edge countdown label */}
+                {waitingColor ? (
+                  <>
+                    {/* Compute connected group (only tables whose edges touch this table) */}
+                    {(() => {
+                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
+                      let overlay: React.ReactNode | null = null;
+                      let suppressIndividual = false;
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const groupH = Math.max(0, maxY - minY);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            overlay = (
+                              <div
+                                className="absolute pointer-events-none"
+                    style={{
+                                  left: `${(minX + groupW / 2) - table.x}px`,
+                                  top: `${(minY + groupH / 2) - table.y}px`,
+                                  width: `${groupW}px`,
+                                  height: `${groupH}px`,
+                                  transform: 'translate(-50%, -50%)',
+                                  willChange: 'left, top, width, height'
+                                }}
+                              >
+                                <ProgressStroke
+                                  shape="rect"
+                                  tableWidth={groupW}
+                                  tableHeight={groupH}
+                                  rotation={0}
+                                  color={waitingColor}
+                                  reservationDate={reservationForTable.date}
+                                  reservationTime={reservationForTable.time}
+                                  createdAt={reservationForTable.createdAt || (reservationForTable as any).created_at}
+                                  gap={4}
+                                  strokeWidth={4}
+                                  windowMinutes={60}
+                                  borderRadiusPx={8}
+                                />
+                              </div>
+                            );
+                          } else {
+                            suppressIndividual = true;
+                          }
+                        }
+                      }
+                      if (!overlay && !suppressIndividual) {
+                        overlay = (
+                          <div
+                            className="absolute pointer-events-none"
+                            style={{
+                              left: `${width / 2}px`,
+                              top: `${height / 2}px`,
+                              width: `${width}px`,
+                              height: `${height}px`,
+                              transform: 'translate(-50%, -50%)',
+                              willChange: 'left, top, width, height'
+                            }}
+                          >
+                            <ProgressStroke
+                              shape="rect"
+                              tableWidth={width}
+                              tableHeight={height}
+                              rotation={rotation}
+                              color={waitingColor}
+                              reservationDate={reservationForTable.date}
+                              reservationTime={reservationForTable.time}
+                              createdAt={reservationForTable.createdAt || (reservationForTable as any).created_at}
+                              gap={4}
+                              strokeWidth={4}
+                              windowMinutes={60}
+                              borderRadiusPx={8}
+                            />
+                            </div>
+                        );
+                      }
+                      return overlay;
+                    })()}
+                    {/* Top-edge time label - single label for grouped ring, else per-table */}
+                    {(() => {
+                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            return (
+                              <div
+                                className="absolute pointer-events-none"
+                                style={{ left: `${minX - table.x}px`, top: `${minY - table.y}px`, width: `${groupW}px`, height: `0px`, zIndex: 9999 }}
+                              >
+                                <div
+                                  className="absolute"
+                                  style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}
+                                >
+                                  <div
+                                    className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
+                                    style={{
+                                      backgroundColor: waitingColor,
+                                      color: '#FFFFFF',
+                                      border: `1px solid ${waitingColor}`,
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                                    }}
+                                  >
+                                    <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          // Non-leader in group: hide label
+                          return null;
+                        }
+                      }
+                      // Fallback: per-table label aligned to table rotation
+                      return (
+                        <div
+                          className="absolute inset-0 pointer-events-none"
+                          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center', zIndex: 9999 }}
+                        >
+                          <div className="absolute" style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}>
+                            <div
+                              className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
+                              style={{ backgroundColor: waitingColor, color: '#FFFFFF', border: `1px solid ${waitingColor}`, boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
+                            >
+                              <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : null}
                 {reservationForTable && isPrimaryTableForReservation ? (() => {
                   const list = getAssignedWaiters(reservationForTable.id);
                   return list && list.length > 0 ? (
-                    <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
+                    <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
                         <span
                           key={w}
@@ -3879,29 +6775,260 @@ const Canvas: React.FC<CanvasProps> = ({
           </div>
         ) : (
           <div
-            className="w-full h-full rounded-full flex items-center justify-center text-black font-medium shadow-lg select-none"
-            style={{ backgroundColor: tableColor }}
+            className="w-full h-full rounded-full flex items-center justify-center text-black font-medium select-none"
+            style={{ backgroundColor: tableColor, boxShadow: '0 0 8px rgba(0,0,0,0.18), 0 0 8px rgba(0,0,0,0.12)' }}
           >
              {editingTableId === table.id ? (
-              <input
-                type="number"
-                value={tableNameInput}
-                onChange={handleTableNameChange}
-                onBlur={handleTableNameSubmit}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleTableNameSubmit(); if (e.key === 'Escape') setEditingTableId(null); }}
-                className="w-full h-full text-center bg-white text-black font-bold text-lg border-4 border-blue-500 rounded-full outline-none shadow-lg z-[70] hide-number-arrows"
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                min="1"
-              />
+              <div className="w-full h-full bg-white border-4 border-blue-500 rounded-full outline-none z-[70] relative flex items-center justify-center" style={{ boxShadow: '0 0 16px rgba(0,0,0,0.18), 0 0 8px rgba(0,0,0,0.12)' }}>
+                <input
+                  type="number"
+                  value={tableNameInput}
+                  onChange={handleTableNameChange}
+                  onBlur={handleTableNameSubmit}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleTableNameSubmit(); if (e.key === 'Escape') setEditingTableId(null); }}
+                  className="w-full h-full text-center bg-transparent text-black font-bold text-xs outline-none hide-number-arrows"
+                  style={{ transform: `rotate(${-rotation}deg)`, transformOrigin: 'center' }}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                   min="1"
+                   max="999"
+                />
+              </div>
             ) : (
               <div style={{ transform: `rotate(${-rotation}deg)`, position: 'relative', width: '100%', height: '100%' }} className="select-none">
-                <div className="w-full h-full flex items-center justify-center text-black font-medium">{table.name}</div>
+                <div className="w-full h-full flex items-center justify-center text-black font-medium text-xs">
+                  <span className="relative inline-flex items-center justify-center">
+                    
+                    {table.name}
+                    {showVipStar ? (
+                      <span className="absolute -top-0.5 -right-3 pointer-events-none">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500">
+                          <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/>
+                        </svg>
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                {/* Removed static dashed table border for seated; only progress ring remains */}
+                {/* Seated (ARRIVED) progress + time inside table - circle */}
+                {arrivedReservationForTable && arrivedColor ? (
+                  <>
+                    <SeatedProgressStroke
+                      shape="circle"
+                      tableWidth={width}
+                      tableHeight={height}
+                      rotation={rotation}
+                      color={arrivedColor}
+                      reservation={arrivedReservationForTable}
+                      gap={4}
+                      strokeWidth={3}
+                    />
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
+                    >
+                      <div className="absolute" style={{ top: '4px', left: '50%', transform: 'translate(-50%, -60%)' }}>
+                        <SeatedCountdownBadge reservation={arrivedReservationForTable} color={arrivedColor} />
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                {/* Waiting progress ring + top-edge countdown label for circular tables */}
+                {waitingColor ? (
+                  <>
+                    {/* Compute connected group (only tables whose edges touch this table) */}
+                    {(() => {
+                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
+                      let overlay: React.ReactNode | null = null;
+                      let suppressIndividual = false;
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const groupH = Math.max(0, maxY - minY);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            overlay = (
+                              <div
+                                className="absolute pointer-events-none"
+                    style={{
+                                  left: `${(minX + groupW / 2) - table.x}px`,
+                                  top: `${(minY + groupH / 2) - table.y}px`,
+                                  width: `${groupW}px`,
+                                  height: `${groupH}px`,
+                                  transform: 'translate(-50%, -50%)',
+                                  willChange: 'left, top, width, height'
+                                }}
+                              >
+                                <ProgressStroke
+                                  shape="rect"
+                                  tableWidth={groupW}
+                                  tableHeight={groupH}
+                                  rotation={0}
+                                  color={waitingColor}
+                                  reservationDate={reservationForTable.date}
+                                  reservationTime={reservationForTable.time}
+                                  createdAt={reservationForTable.createdAt || (reservationForTable as any).created_at}
+                                  gap={4}
+                                  strokeWidth={4}
+                                  windowMinutes={60}
+                                  borderRadiusPx={8}
+                                />
+                              </div>
+                            );
+                          } else {
+                            suppressIndividual = true;
+                          }
+                        }
+                      }
+                      if (!overlay && !suppressIndividual) {
+                        overlay = (
+                          <div
+                            className="absolute pointer-events-none"
+                            style={{
+                              left: `${width / 2}px`,
+                              top: `${height / 2}px`,
+                              width: `${width}px`,
+                              height: `${height}px`,
+                              transform: 'translate(-50%, -50%)',
+                              willChange: 'left, top, width, height'
+                            }}
+                          >
+                            <ProgressStroke
+                              shape="circle"
+                              tableWidth={width}
+                              tableHeight={height}
+                              rotation={rotation}
+                              color={waitingColor}
+                              reservationDate={reservationForTable.date}
+                              reservationTime={reservationForTable.time}
+                              createdAt={reservationForTable.createdAt || (reservationForTable as any).created_at}
+                              gap={4}
+                              strokeWidth={4}
+                              windowMinutes={60}
+                            />
+                          </div>
+                        );
+                      }
+                      return overlay;
+                    })()}
+                    {/* Top-edge time label - single label for grouped ring, else per-table */}
+                    {(() => {
+                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            return (
+                              <div
+                                className="absolute pointer-events-none"
+                                style={{ left: `${minX - table.x}px`, top: `${minY - table.y}px`, width: `${groupW}px`, height: `0px`, zIndex: 9999 }}
+                              >
+                                <div
+                                  className="absolute"
+                                  style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}
+                                >
+                                  <div
+                                    className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
+                                    style={{
+                                      backgroundColor: waitingColor,
+                                      color: '#FFFFFF',
+                                      border: `1px solid ${waitingColor}`,
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                                    }}
+                                  >
+                                    <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }
+                      }
+                      return (
+                        <div
+                          className="absolute inset-0 pointer-events-none"
+                          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center', zIndex: 9999 }}
+                        >
+                          <div className="absolute" style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}>
+                            <div
+                              className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
+                              style={{ backgroundColor: waitingColor, color: '#FFFFFF', border: `1px solid ${waitingColor}`, boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
+                            >
+                              <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : null}
                 {reservationForTable && isPrimaryTableForReservation ? (() => {
                   const list = getAssignedWaiters(reservationForTable.id);
                   return list && list.length > 0 ? (
-                    <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
+                    <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
                         <span
                           key={w}
@@ -4048,7 +7175,7 @@ const Canvas: React.FC<CanvasProps> = ({
     if (!isDrawing) return null;
 
     if (selectedTool === 'table') {
-      const { width, height } = getConstrainedDimensions(drawStart.x, drawStart.y, drawEnd.x, drawEnd.y, isShiftPressed);
+      const { width, height } = getConstrainedDimensions(drawStart.x, drawStart.y, drawEnd.x, drawEnd.y, isShiftPressed || tableType === 'circle');
       const x = width < 0 ? drawStart.x + width : drawStart.x;
       const y = height < 0 ? drawStart.y + height : drawStart.y;
 
@@ -4062,9 +7189,48 @@ const Canvas: React.FC<CanvasProps> = ({
               width: `${Math.abs(width)}px`,
               height: `${Math.abs(height)}px`,
               borderRadius: tableType === 'circle' ? '50%' : '8px',
-              backgroundColor: 'rgba(59, 130, 246, 0.1)'
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              zIndex: 300
             }}
           />
+
+          {/* Recommended standard size preview (5x5 grid cells) */}
+          {showStandardSizePreview && (() => {
+            // Orient the preview square from the start point following current drag direction
+            const signX = width >= 0 ? 1 : -1;
+            const signY = height >= 0 ? 1 : -1;
+            const standardCells = tableType === 'circle' ? STANDARD_CIRCLE_GRID_CELLS : STANDARD_TABLE_GRID_CELLS;
+            const stdSize = GRID_SIZE * standardCells;
+            const px = signX >= 0 ? drawStart.x : drawStart.x - stdSize;
+            const py = signY >= 0 ? drawStart.y : drawStart.y - stdSize;
+            const radius = tableType === 'circle' ? '50%' : '8px';
+            const isLightTheme = (typeof document !== 'undefined') && document.documentElement.getAttribute('data-theme') === 'light';
+            const textColor = isLightTheme ? '#111827' : '#F9FAFB';
+            return (
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: `${px}px`,
+                  top: `${py}px`,
+                  width: `${stdSize}px`,
+                  height: `${stdSize}px`,
+                  borderRadius: radius,
+                  border: '1.5px dashed rgba(26, 220, 155, 0.5)', // emerald-500
+                  boxShadow: 'inset 0 0 0 1px rgba(16, 185, 129, 0.25)',
+                  backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 300
+                }}
+                title="Recommended size (5×5 grid)"
+              >
+                <span style={{ fontSize: '8px', color: textColor, opacity: 0.35, display: 'block', width: '100%', textAlign: 'center' }}>
+                  Standard size
+                </span>
+              </div>
+            );
+          })()}
 
         </>
       );
@@ -4108,7 +7274,8 @@ const Canvas: React.FC<CanvasProps> = ({
               top: `${y}px`,
               width: `${actualWidth}px`,
               height: `${actualHeight}px`,
-              backgroundColor: 'rgba(59, 130, 246, 0.3)'
+              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+              zIndex: 300
             }}
           />
 
@@ -4131,6 +7298,7 @@ const Canvas: React.FC<CanvasProps> = ({
             top: `${y}px`,
             width: `${width}px`,
             height: `${height}px`,
+            zIndex: 300
           }}
         />
       );
@@ -4155,7 +7323,8 @@ const Canvas: React.FC<CanvasProps> = ({
           left: `${x}px`,
           top: `${y}px`,
           width: `${width}px`,
-          height: `${height}px`
+          height: `${height}px`,
+          zIndex: 280
         }}
       />
     );
@@ -4195,29 +7364,11 @@ const Canvas: React.FC<CanvasProps> = ({
       if (table) {
         const newId = `table-${timestamp}-${index}`;
         duplicates.push(newId);
-        // Collect all table numbers from ALL zones for global numbering
-        let allNumbers: number[] = [];
-        
-        // Add numbers from current zone
-        allNumbers.push(...(layout.tables || []).map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-        
-        // Add numbers from all other zones
-        Object.entries(zoneLayouts || {}).forEach(([zoneId, zoneLayout]) => {
-          if (zoneLayout?.tables) {
-            allNumbers.push(...zoneLayout.tables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-          }
-        });
-        
-        // Add numbers from tables already created in this duplication batch
-        allNumbers.push(...newTables.map(t => t.number).filter(n => typeof n === 'number' && isFinite(n)));
-        
-        const maxNumber = allNumbers.length > 0 ? Math.max(...allNumbers) : 0;
-        const nextTableNumber = maxNumber + 1;
         const newTable = {
           ...table,
           id: newId,
-          number: nextTableNumber,
-          name: `${nextTableNumber}`,
+          number: table.number,
+          name: `${table.number}`,
           color: '#FFFFFF'
         };
         newTables.push(newTable);
@@ -4247,6 +7398,15 @@ const Canvas: React.FC<CanvasProps> = ({
       walls: [...(layout.walls || []), ...newWalls],
       texts: [...(layout.texts || []), ...newTexts]
     });
+    
+    // Update global next auto number based on the highest duplicated table number
+    if (newTables.length > 0) {
+      const duplicatedMax = newTables
+        .map(t => (typeof t.number === 'number' && isFinite(t.number) ? t.number : 0))
+        .reduce((m, n) => Math.max(m, n), 0);
+      const nextFromDuplicate = Math.min(999, Math.max(1, duplicatedMax + 1));
+      setNextAutoTableNumber(nextFromDuplicate);
+    }
     
     // Select the duplicates
     setSelectedElements(duplicates);
@@ -4420,100 +7580,139 @@ const Canvas: React.FC<CanvasProps> = ({
         rotation: groupRotation
       };
     } else if (selectedElements.length > 1) {
-      // For group selection, compute a circular mean of rotations and use OBB
-      // This avoids artifacts when elements are around the 0°/360° boundary
-      let sumSin = 0;
-      let sumCos = 0;
-      let rotationCount = 0;
-      
-      selectedElements.forEach(elementId => {
-        const table = currentLayout.tables?.find(t => t.id === elementId);
-        const wall = currentLayout.walls?.find(w => w.id === elementId);
-        const text = currentLayout.texts?.find(t => t.id === elementId);
-        
-        let angleDeg: number | undefined;
-        if (table) {
-          angleDeg = normalizeAngle(table.rotation || 0);
-        } else if (wall) {
-          angleDeg = normalizeAngle(Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) * 180 / Math.PI);
-        } else if (text) {
-          angleDeg = normalizeAngle(text.rotation || 0);
+      // For group selection:
+      // - If group is rotating, compute an oriented bounding box (OBB) that tightly follows
+      //   the currently rotated objects using the group's current visual angle.
+      // - Otherwise, fall back to AABB or common-rotation OBB below.
+      if (isGroupRotating) {
+        const displayAngle = currentRotationAngle;
+        const theta = displayAngle * Math.PI / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+        for (const p of allCorners) {
+          const u = p.x * cos + p.y * sin;
+          const v = -p.x * sin + p.y * cos;
+          if (u < minU) minU = u;
+          if (u > maxU) maxU = u;
+          if (v < minV) minV = v;
+          if (v > maxV) maxV = v;
         }
-        
-        if (angleDeg !== undefined) {
-          const angleRad = angleDeg * Math.PI / 180;
-          sumSin += Math.sin(angleRad);
-          sumCos += Math.cos(angleRad);
-          rotationCount++;
-        }
-      });
-      
-      if (rotationCount > 0) {
-        const meanRad = Math.atan2(sumSin / rotationCount, sumCos / rotationCount);
-        const meanDeg = meanRad * 180 / Math.PI;
-        groupRotation = normalizeAngle(meanDeg);
+        const width = Math.max(0, maxU - minU);
+        const height = Math.max(0, maxV - minV);
+        const centerU = (minU + maxU) / 2;
+        const centerV = (minV + maxV) / 2;
+        const centerX = centerU * cos - centerV * sin;
+        const centerY = centerU * sin + centerV * cos;
+        return {
+          x: centerX - width / 2,
+          y: centerY - height / 2,
+          width,
+          height,
+          centerX,
+          centerY,
+          rotation: displayAngle
+        };
       }
       
-      // Calculate global center first using AABB
+      // If all selected elements share the same rotation (e.g., all initially 0°),
+      // show an oriented bounding box aligned to that common rotation so the selection
+      // visually matches the group's edges even when not actively rotating.
+      // Compute common rotation modulo 180° (orientation equivalence).
+      const current = interactionLayout || layout;
+      const anglesDeg: number[] = [];
+      selectedElements.forEach(elementId => {
+        const table = current.tables?.find(t => t.id === elementId);
+        const wall = current.walls?.find(w => w.id === elementId);
+        const text = current.texts?.find(t => t.id === elementId);
+        if (table && typeof table.rotation === 'number') {
+          anglesDeg.push(normalizeAngle(table.rotation) % 180);
+        } else if (text && typeof text.rotation === 'number') {
+          anglesDeg.push(normalizeAngle(text.rotation) % 180);
+        } else if (wall) {
+          const angle = Math.atan2(wall.y2 - wall.y1, wall.x2 - wall.x1) * 180 / Math.PI;
+          const norm = ((angle % 180) + 180) % 180;
+          anglesDeg.push(norm);
+        }
+      });
+      const hasAngles = anglesDeg.length > 0;
+      const epsilon = 0.5; // degrees
+      const allSameRotation =
+        hasAngles && anglesDeg.every(a => {
+          const b = anglesDeg[0];
+          const diff = Math.abs(a - b);
+          return Math.min(diff, 180 - diff) <= epsilon;
+        });
+      
+      if (allSameRotation) {
+        // Use the first element's full rotation (0..360) as display rotation
+        // Find a representative element to extract absolute angle
+        let displayAngle = 0;
+        const repId = selectedElements.find(id => {
+          const t = current.tables?.find(x => x.id === id);
+          const tx = current.texts?.find(x => x.id === id);
+          const w = current.walls?.find(x => x.id === id);
+          return (t && typeof t.rotation === 'number') || (tx && typeof tx.rotation === 'number') || !!w;
+        });
+        if (repId) {
+          const t = current.tables?.find(x => x.id === repId);
+          const tx = current.texts?.find(x => x.id === repId);
+          const w = current.walls?.find(x => x.id === repId);
+          if (t && typeof t.rotation === 'number') {
+            displayAngle = normalizeAngle(t.rotation || 0);
+          } else if (tx && typeof tx.rotation === 'number') {
+            displayAngle = normalizeAngle(tx.rotation || 0);
+          } else if (w) {
+            displayAngle = normalizeAngle(Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI);
+          }
+        }
+        
+        const theta = displayAngle * Math.PI / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        
+        // Project all points onto the local axes (u aligned with theta, v perpendicular)
+        let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+        for (const p of allCorners) {
+          const u = p.x * cos + p.y * sin;
+          const v = -p.x * sin + p.y * cos;
+          if (u < minU) minU = u;
+          if (u > maxU) maxU = u;
+          if (v < minV) minV = v;
+          if (v > maxV) maxV = v;
+        }
+        const width = Math.max(0, maxU - minU);
+        const height = Math.max(0, maxV - minV);
+        const centerU = (minU + maxU) / 2;
+        const centerV = (minV + maxV) / 2;
+        // Transform center back to world coordinates
+        const centerX = centerU * cos - centerV * sin;
+        const centerY = centerU * sin + centerV * cos;
+        
+        return {
+          x: centerX - width / 2,
+          y: centerY - height / 2,
+          width,
+          height,
+          centerX,
+          centerY,
+          rotation: displayAngle
+        };
+      }
+      
       const minX = Math.min(...allCorners.map(c => c.x));
       const maxX = Math.max(...allCorners.map(c => c.x));
       const minY = Math.min(...allCorners.map(c => c.y));
       const maxY = Math.max(...allCorners.map(c => c.y));
-      const globalCenterX = (minX + maxX) / 2;
-      const globalCenterY = (minY + maxY) / 2;
       
-      // Project all corners to local coordinate system of the group rotation
-      const rad = groupRotation * Math.PI / 180;
-      const cos = Math.cos(-rad); // Use negative for inverse rotation
-      const sin = Math.sin(-rad);
-      
-      let localMinX = Infinity, localMaxX = -Infinity;
-      let localMinY = Infinity, localMaxY = -Infinity;
-      
-      allCorners.forEach(corner => {
-        // Translate to group center
-        const translatedX = corner.x - globalCenterX;
-        const translatedY = corner.y - globalCenterY;
-        
-        // Rotate to local coordinate system
-        const localX = translatedX * cos - translatedY * sin;
-        const localY = translatedX * sin + translatedY * cos;
-        
-        // Track min/max in local coordinates
-        localMinX = Math.min(localMinX, localX);
-        localMaxX = Math.max(localMaxX, localX);
-        localMinY = Math.min(localMinY, localY);
-        localMaxY = Math.max(localMaxY, localY);
-      });
-      
-      // Calculate oriented bounding box dimensions
-      const obbWidth = localMaxX - localMinX;
-      const obbHeight = localMaxY - localMinY;
-      
-      // The AABB center rotated into local space might not be the OBB center.
-      // Compute the true local center of the OBB, then transform it back to global.
-      const localCenterX = (localMinX + localMaxX) / 2;
-      const localCenterY = (localMinY + localMaxY) / 2;
-      
-      // Convert the local center offset back to global coordinates
-      const cosForward = Math.cos(rad);
-      const sinForward = Math.sin(rad);
-      const offsetGlobalX = localCenterX * cosForward - localCenterY * sinForward;
-      const offsetGlobalY = localCenterX * sinForward + localCenterY * cosForward;
-      
-      const obbCenterX = globalCenterX + offsetGlobalX;
-      const obbCenterY = globalCenterY + offsetGlobalY;
-      
-      // Return the oriented bounding box using the true global center
-      // The selection outline will handle the rotation via CSS transform
       return {
-        x: obbCenterX - obbWidth / 2,
-        y: obbCenterY - obbHeight / 2,
-        width: obbWidth,
-        height: obbHeight,
-        centerX: obbCenterX,
-        centerY: obbCenterY,
-        rotation: groupRotation
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY,
+        centerX: (minX + maxX) / 2,
+        centerY: (minY + maxY) / 2,
+        rotation: 0
       };
     }
     
@@ -4524,8 +7723,8 @@ const Canvas: React.FC<CanvasProps> = ({
   const renderSelectionHandles = () => {
     if (!isEditing || selectedTool !== 'select' || selectedElements.length === 0) return null;
     
-    // Don't show selection handles when editing text
-    if (editingTextId) return null;
+    // Don't show selection handles when editing text or table name
+    if (editingTextId || editingTableId) return null;
     
     // Always recalculate group bounds to ensure they track current positions
     const groupBounds = getGroupBoundingBox();
@@ -4544,6 +7743,29 @@ const Canvas: React.FC<CanvasProps> = ({
       return currentLayout.texts?.find(t => t.id === elementId);
     })();
     
+    // Hide side handles for circular tables to prevent width/height-only resizing
+    const isCircleOnlySelection = isSingleSelection && (() => {
+      const elementId = selectedElements[0];
+      const currentLayout = interactionLayout || layout;
+      const element = currentLayout.tables?.find(t => t.id === elementId);
+      return Boolean(element && element.type === 'circle');
+    })();
+    
+    // Treat selection as "circular table with chairs" when the single non-chair element is a circle and others are its chairs.
+    const isLockedCircleSelection = (() => {
+      const currentLayout = interactionLayout || layout;
+      const selectedTables = (currentLayout.tables || []).filter(t => selectedElements.includes(t.id));
+      const nonChairs = selectedTables.filter(t => t && t.type !== 'chair');
+      if (nonChairs.length !== 1) return false;
+      const parent = nonChairs[0];
+      if (!(parent && parent.type === 'circle')) return false;
+      // Optional: ensure other selected elements (if any) are chairs attached to this parent
+      const others = selectedTables.filter(t => t.id !== parent.id);
+      return others.every(t => t.type === 'chair' && (t as any).attachedToTableId === parent.id);
+    })();
+    
+    // Chairs now support normal resize handles like other objects
+    
     // Expand bounds with padding
     const boundedBox = {
       x: groupBounds.x - padding,
@@ -4553,7 +7775,6 @@ const Canvas: React.FC<CanvasProps> = ({
       centerX: groupBounds.centerX,
       centerY: groupBounds.centerY
     };
-    
     return (
       <>
         {/* Selection outline */}
@@ -4566,12 +7787,12 @@ const Canvas: React.FC<CanvasProps> = ({
             height: `${boundedBox.height}px`,
             transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
             transformOrigin: 'center',
-            zIndex: 10
+            zIndex: 600
           }}
         />
         
-        {/* Scale handles - corners (not shown for text elements) */}
-        {!isTextOnlySelection && ['tl', 'tr', 'bl', 'br'].map((handle) => {
+        {/* Corner areas: always render rotation trigger; hide actual grips only for text */}
+        {(!isTextOnlySelection) && ['tl', 'tr', 'bl', 'br'].map((handle) => {
           // Calculate handle position relative to center
           let relX, relY;
           switch (handle) {
@@ -4611,59 +7832,52 @@ const Canvas: React.FC<CanvasProps> = ({
           const triggerX = x + dirX * triggerDistance - triggerSize / 2 + handleSize / 2;
           const triggerY = y + dirY * triggerDistance - triggerSize / 2 + handleSize / 2;
           
-          // Calculate rotated cursor for corner handles
-          let cursor = handle === 'tl' || handle === 'br' ? 'nw-resize' : 'ne-resize';
+          // Cursor for corner handles:
+          // - If selection rotation is near 45°(+k*90°), corners visually become top/right/bottom/left (diamond).
+          //   In that case use cardinal cursors (n/e/s/w) based on corner's angle.
+          // - Otherwise, use nearest diagonal cursor (↘/↙/↖/↗).
+          const cornerAngle = (Math.atan2(rotatedY, rotatedX) * 180 / Math.PI + 360) % 360;
+          const rotNorm = ((rotation % 360) + 360) % 360;
+          const nearestDiff = (a: number, b: number) => {
+            let d = Math.abs(a - b);
+            return d > 180 ? 360 - d : d;
+          };
+          const diamondAngles = [45, 135, 225, 315];
+          const DIAMOND_THRESH = 10; // degrees tolerance for "near 45°"
+          const isDiamond = diamondAngles.some(a => nearestDiff(rotNorm, a) <= DIAMOND_THRESH);
+          
+          let cursor = 'nwse-resize';
+          if (isDiamond) {
+            // Map to nearest cardinal for diamond orientation
+            const cardinals = [
+              { angle: 0,   cursor: 'e-resize' },
+              { angle: 90,  cursor: 's-resize' },
+              { angle: 180, cursor: 'w-resize' },
+              { angle: 270, cursor: 'n-resize' },
+              { angle: 360, cursor: 'e-resize' }
+            ];
+            let min = Infinity;
+            for (const c of cardinals) {
+              const diff = nearestDiff(cornerAngle, c.angle);
+              if (diff < min) { min = diff; cursor = c.cursor; }
+            }
+          } else {
+            const diagonals = [
+              { angle: 45,  cursor: 'nwse-resize' },
+              { angle: 135, cursor: 'nesw-resize' },
+              { angle: 225, cursor: 'nwse-resize' },
+              { angle: 315, cursor: 'nesw-resize' }
+            ];
+            let min = Infinity;
+            for (const d of diagonals) {
+              const diff = nearestDiff(cornerAngle, d.angle);
+              if (diff < min) { min = diff; cursor = d.cursor; }
+            }
+          }
           let cursorClass = '';
           if (isRotationArea) {
             cursorClass = 'cursor-rotate';
             cursor = 'grab'; // fallback
-          } else {
-            // Calculate cursor based on actual visual position after rotation
-            // Determine which visual quadrant this grip is in after rotation
-            const rad = rotation * Math.PI / 180;
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-            
-            // Get the rotated position vector
-            const rotatedX = relX * cos - relY * sin;
-            const rotatedY = relX * sin + relY * cos;
-            
-            // Determine cursor based on actual visual position
-            const angle = Math.atan2(rotatedY, rotatedX) * 180 / Math.PI;
-            const normalizedAngle = angle < 0 ? angle + 360 : angle;
-            
-            // Find the closest cursor direction for smooth rotation
-            // Available cursor directions and their angles
-            const cursorDirections = [
-              { angle: 0, cursor: 'e-resize' },      // Right
-              { angle: 45, cursor: 'se-resize' },    // Down-Right
-              { angle: 90, cursor: 's-resize' },     // Down
-              { angle: 135, cursor: 'sw-resize' },   // Down-Left
-              { angle: 180, cursor: 'w-resize' },    // Left
-              { angle: 225, cursor: 'nw-resize' },   // Up-Left
-              { angle: 270, cursor: 'n-resize' },    // Up
-              { angle: 315, cursor: 'ne-resize' },   // Up-Right
-              { angle: 360, cursor: 'e-resize' }     // Right (wrap around)
-            ];
-            
-            // Find the closest cursor direction
-            let minDiff = Infinity;
-            let closestCursor = 'e-resize';
-            
-            for (const direction of cursorDirections) {
-              let diff = Math.abs(normalizedAngle - direction.angle);
-              // Handle wrap-around (e.g., 350° is close to 0°)
-              if (diff > 180) {
-                diff = 360 - diff;
-              }
-              
-              if (diff < minDiff) {
-                minDiff = diff;
-                closestCursor = direction.cursor;
-              }
-            }
-            
-            cursor = closestCursor;
           }
           
           return (
@@ -4677,7 +7891,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   width: `${triggerSize}px`,
                   height: `${triggerSize}px`,
                   pointerEvents: 'auto',
-                  zIndex: 16
+                  zIndex: 630
                 }}
                 onMouseEnter={() => setHoveredHandle(`rotation-outside-${handle}`)}
                 onMouseLeave={() => setHoveredHandle(null)}
@@ -4690,57 +7904,64 @@ const Canvas: React.FC<CanvasProps> = ({
                 }}
               />
               
-              {/* Main handle */}
-              <div
-                key={`selection-corner-${handle}`}
-                className={`absolute bg-blue-400 border border-white hover:bg-blue-300 transition-colors ${cursorClass}`}
-                data-handle={handle}
-                          style={{
-              left: `${x}px`,
-              top: `${y}px`,
-              width: `${handleSize}px`,
-              height: `${handleSize}px`,
-              borderRadius: '2px',
-                  cursor: cursorClass ? undefined : cursor,
-              pointerEvents: 'auto',
-              zIndex: 15
-            }}
-              onMouseDown={(e) => {
-                if (isRotationArea) {
-                  if (isSingleSelection) {
-                    handleRotationStart(e, selectedElements[0]);
-                  } else {
-                    handleGroupRotationStart(e);
-                  }
-                } else {
-                  if (isSingleSelection) {
-                    const elementId = selectedElements[0];
-                    const currentLayout = interactionLayout || layout;
-                    const element = currentLayout.tables?.find(t => t.id === elementId);
-                    if (element) {
-                      handleTableResizeStart(e, elementId, handle as 'tl' | 'tr' | 'bl' | 'br');
+              {/* Main handle (hidden for text selections) */}
+              {!isTextOnlySelection && (
+                <div
+                  key={`selection-corner-${handle}`}
+                  className={`absolute bg-blue-400 border border-white hover:bg-blue-300 transition-colors ${cursorClass}`}
+                  data-handle={handle}
+                  style={{
+                    left: `${x}px`,
+                    top: `${y}px`,
+                    width: `${handleSize}px`,
+                    height: `${handleSize}px`,
+                    borderRadius: '2px',
+                    cursor: cursorClass ? undefined : cursor,
+                    pointerEvents: 'auto',
+                  zIndex: 620
+                  }}
+                  onMouseDown={(e) => {
+                    if (isRotationArea) {
+                      if (isSingleSelection) {
+                        handleRotationStart(e, selectedElements[0]);
+                      } else {
+                        handleGroupRotationStart(e);
+                      }
+                    } else {
+                      if (isSingleSelection) {
+                        const elementId = selectedElements[0];
+                        const currentLayout = interactionLayout || layout;
+                        const element = currentLayout.tables?.find(t => t.id === elementId);
+                        if (element) {
+                          handleTableResizeStart(e, elementId, handle as 'tl' | 'tr' | 'bl' | 'br');
+                        }
+                        // For walls, use dedicated wall scale
+                        const wall = currentLayout.walls?.find(w => w.id === elementId);
+                        if (wall) {
+                          handleWallScaleStart(e, elementId, handle as 'tl' | 'tr' | 'bl' | 'br');
+                        }
+                        // Texts don't support scaling - skip
+                      } else {
+                        const parentId = getParentIdIfSelectionIsParentWithOwnChairs();
+                        if (parentId) {
+                          handleTableResizeStart(e, parentId, handle as 'tl' | 'tr' | 'bl' | 'br');
+                        } else {
+                          handleGroupScaleStart(e, handle as 'tl' | 'tr' | 'bl' | 'br');
+                        }
+                      }
                     }
-                    // For walls, use dedicated wall scale
-                    const wall = currentLayout.walls?.find(w => w.id === elementId);
-                    if (wall) {
-                      handleWallScaleStart(e, elementId, handle as 'tl' | 'tr' | 'bl' | 'br');
-                    }
-                    // Texts don't support scaling - skip
-                  } else {
-                    handleGroupScaleStart(e, handle as 'tl' | 'tr' | 'bl' | 'br');
-                  }
-                }
-              }}
-              onMouseEnter={() => setHoveredHandle(handle)}
-              onMouseMove={() => setHoveredHandle(handle)}
-              onMouseLeave={() => setHoveredHandle(null)}
-              />
+                  }}
+                  onMouseEnter={() => setHoveredHandle(handle)}
+                  onMouseMove={() => setHoveredHandle(handle)}
+                  onMouseLeave={() => setHoveredHandle(null)}
+                />
+              )}
             </div>
           );
         })}
         
-        {/* Scale handles - sides (not shown for text elements) */}
-        {!isTextOnlySelection && ['t', 'r', 'b', 'l'].map((handle) => {
+        {/* Scale handles - sides (not shown for text elements or circular tables or locked circle selections) */}
+        {(!isTextOnlySelection && !isCircleOnlySelection && !isLockedCircleSelection) && ['t', 'r', 'b', 'l'].map((handle) => {
           // Calculate handle position relative to center
           let relX, relY;
           let baseCursor;
@@ -4841,7 +8062,7 @@ const Canvas: React.FC<CanvasProps> = ({
               borderRadius: '2px',
               cursor,
               pointerEvents: 'auto',
-              zIndex: 15
+              zIndex: 620
             }}
               onMouseDown={(e) => {
                 e.stopPropagation();
@@ -4860,7 +8081,12 @@ const Canvas: React.FC<CanvasProps> = ({
                   }
                   // Texts don't support scaling - skip
                                   } else {
-                    handleGroupScaleStart(e, handle as 't' | 'r' | 'b' | 'l');
+                    const parentId = getParentIdIfSelectionIsParentWithOwnChairs();
+                    if (parentId) {
+                      handleTableResizeStart(e, parentId, handle as 't' | 'r' | 'b' | 'l');
+                    } else {
+                      handleGroupScaleStart(e, handle as 't' | 'r' | 'b' | 'l');
+                    }
                   }
               }}
             />
@@ -4921,7 +8147,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   top: '0px',
                   width: '100%',
                   height: '100%',
-                  zIndex: 14
+                  zIndex: 610
                 }}
               >
                 <line
@@ -4946,7 +8172,8 @@ const Canvas: React.FC<CanvasProps> = ({
             style={{
               left: `${boundedBox.centerX}px`,
               top: `${boundedBox.centerY - boundedBox.height/2 - 60}px`,
-              transform: 'translateX(-50%)'
+              transform: 'translateX(-50%)',
+              zIndex: 700
             }}
           >
             {Math.round(currentRotationAngle)}°
@@ -5030,23 +8257,21 @@ const Canvas: React.FC<CanvasProps> = ({
             numberOfGuests: 2,
             zoneId: undefined,
             tableIds: [],
+            tableNumbers: Array.isArray(payload.tableNumbers) ? payload.tableNumbers : [],
             phone: payload.phone || '',
             email: payload.email || '',
             notes: '',
             color: '#8B5CF6',
             status: 'waiting'
           };
-          setShowReservationForm(true);
           setShowForm(true);
           setTimeout(() => {
             try { (window as any).dispatchEvent(new CustomEvent('prefill-reservation', { detail: prefill })); } catch {}
           }, 0);
         } else {
-          setShowReservationForm(true);
           setShowForm(true);
         }
       } catch {
-        setShowReservationForm(true);
         setShowForm(true);
       }
     };
@@ -5054,19 +8279,7 @@ const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('respoint-open-reservation', handler as any);
   }, []);
 
-  // If showing reservation form, render it instead of the canvas - MOVED AFTER ALL HOOKS
-  if (showReservationForm && showForm) {
-    return (
-      <div className="flex-1 bg-[#0A1929] relative overflow-hidden">
-        <ReservationForm
-          isOpen={showForm}
-          onClose={onCloseReservationForm}
-          selectedDate={selectedDate}
-          editReservation={editReservation}
-        />
-      </div>
-    );
-  }
+  // Reservation form will be rendered as an overlay later (keep canvas visible beneath)
 
   // Helper function to normalize angles to 0-360 degrees (counterclockwise from center)
   const normalizeAngle = (angle: number): number => {
@@ -5097,22 +8310,19 @@ const Canvas: React.FC<CanvasProps> = ({
     
     return delta;
   };
-
-  
-
   return (
             <div className="flex-1 bg-[#0A1929] relative">
       {/* Top Toolbar */}
       {isAuthenticated && (
         <div
           className={
-            `absolute top-0 left-0 right-0 z-20 px-4 py-1 border-b ` +
-            (document.documentElement.getAttribute('data-theme') === 'light'
+            `absolute top-0 left-0 right-0 z-20 px-4 py-1 border-b overflow-x-auto whitespace-nowrap scrollbar-hide h-10 ` +
+            (isLight
               ? 'bg-white border-gray-200'
               : 'bg-[#000814] border-[#1E2A34]')
           }
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 min-w-max h-full">
             {/* Left side - Edit controls and tools */}
             <div className="flex items-center gap-3">
               {/* Edit/Save controls */}
@@ -5122,7 +8332,7 @@ const Canvas: React.FC<CanvasProps> = ({
                     onClick={toggleEditMode}
                     className={
                       `px-4 py-0.5 text-sm transition-colors rounded ` +
-                      (document.documentElement.getAttribute('data-theme') === 'light'
+                      (isLight
                         ? 'text-gray-800 hover:bg-gray-100'
                         : 'text-white hover:bg-white/10')
                     }
@@ -5145,7 +8355,7 @@ const Canvas: React.FC<CanvasProps> = ({
                         disabled={!hasChanges}
                         className={`px-4 py-0.5 text-sm transition-colors rounded ${
                           hasChanges
-                            ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                            ? (isLight ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
                             : 'text-gray-400 cursor-not-allowed'
                         }`}
                       >
@@ -5156,7 +8366,7 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => setShowSaveLayoutModal(true)}
                       className={
                         `px-4 py-0.5 text-sm transition-colors rounded ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                        (isLight ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
                       }
                     >
                       {t('saveLayoutAs')}
@@ -5165,7 +8375,7 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={handleCancel}
                       className={
                         `px-4 py-0.5 text-sm transition-colors rounded ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                        (isLight ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
                       }
                     >
                       {t('cancel')}
@@ -5177,7 +8387,7 @@ const Canvas: React.FC<CanvasProps> = ({
               {/* Tools - visible when editing */}
               {isEditing && (
                 <>
-                  <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
+                  <div className={isLight ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
                   
                   <div className="flex items-center gap-1">
                     {/* Move Tool */}
@@ -5185,13 +8395,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => onToolChange('select')}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'select' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'select' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('moveToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
                       </svg>
                     </button>
@@ -5204,13 +8414,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       }}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'table' && tableType === 'rectangle' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'table' && tableType === 'rectangle' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('squareTableTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" />
                       </svg>
                     </button>
@@ -5223,13 +8433,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       }}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'table' && tableType === 'circle' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'table' && tableType === 'circle' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('roundTableTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <circle cx="12" cy="12" r="9" />
                       </svg>
                     </button>
@@ -5239,13 +8449,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => onToolChange('wall')}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'wall' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'wall' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('wallToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
                     </button>
@@ -5255,16 +8465,57 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => onToolChange('text')}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'text' ? 'bg-gray-200' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'text' ? 'bg-white/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('textToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M4 7V4h16v3M9 20h6M12 4v16" />
                       </svg>
                     </button>
+
+                    {/* Chair Tool disabled to keep chairs consistent with Add Seats */}
+
+                    {/* Chair size controls when a single chair is selected */}
+                    {(() => {
+                      if (!isEditing) return null;
+                      if (selectedElements.length !== 1) return null;
+                      const currentLayout = interactionLayout || layout;
+                      const chair = currentLayout.tables?.find(t => t.id === selectedElements[0] && t.type === 'chair');
+                      if (!chair) return null;
+                      return (
+                        <div className="flex items-center gap-1 ml-1">
+                          <button
+                            onClick={() => {
+                              const currentW = chair.width || GRID_SIZE * 4;
+                              const currentH = chair.height || GRID_SIZE * 1;
+                              const newW = Math.max(GRID_SIZE, snapToGrid(currentW - GRID_SIZE));
+                              const newH = Math.max(GRID_SIZE, snapToGrid(currentH - GRID_SIZE));
+                              updateTable(chair.id, { width: newW, height: newH });
+                            }}
+                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-1 rounded hover:bg-gray-100' : 'p-1 rounded hover:bg-white/10'}
+                            title={t('decreaseFontSize')}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                          </button>
+                          <button
+                            onClick={() => {
+                              const currentW = chair.width || GRID_SIZE * 4;
+                              const currentH = chair.height || GRID_SIZE * 1;
+                              const newW = snapToGrid(currentW + GRID_SIZE);
+                              const newH = snapToGrid(currentH + GRID_SIZE);
+                              updateTable(chair.id, { width: newW, height: newH });
+                            }}
+                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-1 rounded hover:bg-gray-100' : 'p-1 rounded hover:bg-white/10'}
+                            title={t('increaseFontSize')}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'w-px h-6 bg-gray-200' : 'w-px h-6 bg-[#1E2A34]'} />
 
@@ -5311,13 +8562,13 @@ const Canvas: React.FC<CanvasProps> = ({
                       onClick={() => onToolChange('delete')}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light'
+                        (isLight
                           ? `${selectedTool === 'delete' ? 'bg-red-100' : ''} hover:bg-gray-100 text-gray-700`
                           : `${selectedTool === 'delete' ? 'bg-red-500/20' : ''} hover:bg-white/10 text-white`)
                       }
                       title={t('deleteToolTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />
                       </svg>
                     </button>
@@ -5329,21 +8580,23 @@ const Canvas: React.FC<CanvasProps> = ({
                       }}
                       className={
                         `p-1.5 rounded-md transition-all ` +
-                        (document.documentElement.getAttribute('data-theme') === 'light' ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white')
+                        (isLight ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-white/10 text-white')
                       }
                       title={t('resetAllTooltip')}
                     >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2">
                         <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" />
                       </svg>
                     </button>
+
+                    {/* Numbering policy switch moved inside canvas (overlay). */}
 
                     {/* Font Size Control - visible when text is selected */}
                     {isTextSelected && (
                       <>
                         <div className="w-px h-6 bg-[#1E2A34]" />
                         <div className="flex items-center gap-1">
-                          <span className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 text-sm mr-1' : 'text-white text-sm mr-1'}>{t('fontLabel')}</span>
+                          <span className={isLight ? 'text-gray-700 text-sm mr-1' : 'text-white text-sm mr-1'}>{t('fontLabel')}</span>
                           <input
                             type="number"
                             value={(selectedElement as any).fontSize || 16}
@@ -5354,7 +8607,7 @@ const Canvas: React.FC<CanvasProps> = ({
                               }
                             }}
                             className={
-                              document.documentElement.getAttribute('data-theme') === 'light'
+                              isLight
                                 ? 'w-12 text-sm bg-white text-gray-900 text-center rounded border border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 hide-number-arrows'
                                 : 'w-12 text-sm bg-gray-900 text-white text-center rounded border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 hide-number-arrows'
                             }
@@ -5368,11 +8621,11 @@ const Canvas: React.FC<CanvasProps> = ({
                               const newSize = Math.max(1, currentSize - 1);
                               updateText(selectedElement.id, { fontSize: newSize });
                             }}
-                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
+                            className={isLight ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
                             onMouseDown={(e) => e.stopPropagation()}
                             title={t('decreaseFontSize')}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
                           </button>
                           <button
                             onClick={() => {
@@ -5380,11 +8633,11 @@ const Canvas: React.FC<CanvasProps> = ({
                               const newSize = currentSize + 1;
                               updateText(selectedElement.id, { fontSize: newSize });
                             }}
-                            className={document.documentElement.getAttribute('data-theme') === 'light' ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
+                            className={isLight ? 'p-0.5 rounded hover:bg-gray-100' : 'p-0.5 rounded hover:bg-white/20'}
                             onMouseDown={(e) => e.stopPropagation()}
                             title={t('increaseFontSize')}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={document.documentElement.getAttribute('data-theme') === 'light' ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                            <svg width="14" height="18" viewBox="0 0 24 24" fill="none" stroke={isLight ? '#374151' : 'white'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
                           </button>
                         </div>
                       </>
@@ -5396,15 +8649,15 @@ const Canvas: React.FC<CanvasProps> = ({
 
             {/* Right side - Layouts button */}
             <button
-              onClick={() => setShowLayoutList(!showLayoutList)}
-              className={
-                `px-4 py-0.5 text-sm transition-colors rounded ` +
-                (document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
-              }
-              title={t('savedLayouts')}
-            >
-              {t('layouts')}
-            </button>
+                onClick={() => setShowLayoutList(!showLayoutList)}
+                className={
+                  `px-4 py-0.5 text-sm transition-colors rounded ` +
+                  (isLight ? 'text-gray-800 hover:bg-gray-100' : 'text-white hover:bg-white/10')
+                }
+                title={t('savedLayouts')}
+              >
+                {t('layouts')}
+              </button>
           </div>
         </div>
       )}
@@ -5412,28 +8665,107 @@ const Canvas: React.FC<CanvasProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className="w-full h-full relative overflow-hidden pt-8 pb-20"
+        className="w-full h-full relative overflow-hidden pt-10 pb-20"
         style={{
-          cursor: selectedTool === 'select' ? (isDragging ? 'move' : isShiftPressed && isEditing ? 'copy' : 'default') : 'crosshair',
+          cursor: selectedTool === 'select' ? (isDragging ? 'move' : isShiftPressed && isEditing ? 'copy' : 'default') : (selectedTool === 'text' ? 'crosshair' : 'crosshair'),
           backgroundImage: isEditing
-            ? `linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
-               linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)`
+            ? `linear-gradient(${isLight ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255,255,255,0.06)'} 1px, transparent 1px),
+               linear-gradient(90deg, ${isLight ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255,255,255,0.06)'} 1px, transparent 1px)`
             : undefined,
           backgroundSize: isEditing ? `${GRID_SIZE}px ${GRID_SIZE}px` : undefined,
+          touchAction: 'none',
         }}
         onClick={handleCanvasClick}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onContextMenu={handleContextMenu}
+        onDragOver={(e) => {
+          const types = e.dataTransfer?.types || [];
+          if (types.includes('application/x-respoint-waiter') || types.includes('text/waiter') || types.includes('text/plain')) {
+            setIsWaiterDragActive(true);
+            setHoveredTable(null);
+          }
+        }}
+        onDrop={() => {
+          setIsWaiterDragActive(false);
+        }}
+        onDragLeave={() => {
+          setIsWaiterDragActive(false);
+        }}
       >
+        {/* Overlay: Numbers Auto Shift toggle inside canvas, top-left, faint until hover */}
+        {isEditing && (
+          <div
+            className="absolute left-2 top-12 z-[160] opacity-40 hover:opacity-100 transition-opacity select-none"
+            style={{ background: 'transparent' }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(() => {
+              const isSR = (currentLanguage === 'srb') || (typeof currentLanguage === 'string' && (currentLanguage as any).startsWith?.('sr'));
+              return (
+                <div className="flex items-center gap-3">
+                  {/* Auto Shift Numbers */}
+                  <div className="flex items-center gap-2">
+                    <span className={isLight ? 'text-gray-700 text-xs' : 'text-gray-200 text-xs'}>
+                      {isSR ? 'Auto Pomeranje Brojeva' : 'Auto Shift Numbers'}
+                    </span>
+                    <button
+                      onClick={() => setNumberingPolicy(prev => prev === 'autoShift' ? 'allowDuplicates' : 'autoShift')}
+                      className={
+                        `relative inline-flex h-4 w-8 items-center rounded-full transition-colors ` +
+                        (numberingPolicy === 'autoShift'
+                          ? (isLight ? 'bg-blue-600' : 'bg-blue-500')
+                          : (isLight ? 'bg-gray-300' : 'bg-gray-600'))
+                      }
+                      title={isSR ? 'Uključi/isključi automatski pomeraj' : 'Toggle auto shift'}
+                    >
+                      <span
+                        className={
+                          `inline-block h-3 w-3 transform rounded-full bg-white transition-transform ` +
+                          (numberingPolicy === 'autoShift' ? 'translate-x-4' : 'translate-x-1')
+                        }
+                      />
+                    </button>
+                  </div>
+                  {/* Divider */}
+                  <div className={isLight ? 'w-px h-4 bg-gray-300/70' : 'w-px h-4 bg-white/20'} />
+                  {/* Standard size preview toggle */}
+                  <div className="flex items-center gap-2">
+                    <span className={isLight ? 'text-gray-700 text-xs' : 'text-gray-200 text-xs'}>
+                      {isSR ? 'Prikaz standardne veličine' : 'Standard size preview'}
+                    </span>
+                    <button
+                      onClick={() => setShowStandardSizePreview(v => !v)}
+                      className={
+                        `relative inline-flex h-4 w-8 items-center rounded-full transition-colors ` +
+                        (showStandardSizePreview
+                          ? (isLight ? 'bg-blue-600' : 'bg-blue-500')
+                          : (isLight ? 'bg-gray-300' : 'bg-gray-600'))
+                      }
+                      title={isSR ? 'Uključi/isključi prikaz standardne veličine' : 'Toggle standard size preview'}
+                    >
+                      <span
+                        className={
+                          `inline-block h-3 w-3 transform rounded-full bg-white transition-transform ` +
+                          (showStandardSizePreview ? 'translate-x-4' : 'translate-x-1')
+                        }
+                      />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
         {/* Tables with resize handles */}
         {(interactionLayout || layout).tables?.map(table => renderTableWithHandles(table))}
 
         {/* Walls - render as SVG for better control */}
         <svg
           className="absolute inset-0 pointer-events-none"
-          style={{ width: '100%', height: '100%' }}
+          style={{ width: '100%', height: '100%', zIndex: 0 }}
         >
           <g style={{ pointerEvents: 'auto' }}>
             {(interactionLayout || layout).walls?.map(wall => renderWall(wall))}
@@ -5526,39 +8858,200 @@ const Canvas: React.FC<CanvasProps> = ({
         {/* Context Menu */}
         {showContextMenu && (
           <div
-            className="absolute z-[70] bg-gray-800 border border-gray-600 rounded shadow-lg py-1"
+            ref={contextMenuRef}
+            className="absolute z-[10100] rounded-lg shadow-xl py-1 border text-sm"
             style={{
               left: `${contextMenuPosition.x - canvasRef.current!.getBoundingClientRect().left}px`,
-              top: `${contextMenuPosition.y - canvasRef.current!.getBoundingClientRect().top}px`
+              top: `${contextMenuPosition.y - canvasRef.current!.getBoundingClientRect().top}px`,
+              backgroundColor: 'var(--surface)',
+              borderColor: 'var(--border)',
+              color: 'var(--text)'
             }}
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
             {contextMenuType === 'copy' ? (
-              <button
-                className="px-4 py-2 text-white hover:bg-gray-700 w-full text-left flex items-center gap-2"
-                onClick={() => handleContextMenuAction('copy')}
-              >
-                <span className="text-xs opacity-60">Ctrl+C</span>
-                {t('copySelected')}
-              </button>
+              <>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('copy')}
+                >
+                  {t('copySelected')}
+                  <span className="ml-auto text-[11px] opacity-60">Ctrl+C</span>
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('delete')}
+                >
+                  {'Delete'}
+                  <span className="ml-auto text-[11px] opacity-60">Del</span>
+                </button>
+              </>
+            ) : contextMenuType === 'table' ? (
+              <>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('copy')}
+                >
+                  {t('copySelected')}
+                  <span className="ml-auto text-[11px] opacity-60">Ctrl+C</span>
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('add_seats')}
+                >
+                  {'Add seats'}
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('delete')}
+                >
+                  {'Delete'}
+                  <span className="ml-auto text-[11px] opacity-60">Del</span>
+                </button>
+              </>
+            ) : contextMenuType === 'chair' ? (
+              <>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('copy')}
+                >
+                  {t('copySelected')}
+                  <span className="ml-auto text-[11px] opacity-60">Ctrl+C</span>
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <div className="px-3 py-1 text-xs opacity-70">Chair style</div>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('set_chair_variant_standard')}
+                >
+                  Standard
+                </button>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('set_chair_variant_barstool')}
+                >
+                  Bar stool
+                </button>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('set_chair_variant_booth_curved')}
+                >
+                  Semi-circular booth
+                </button>
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('set_chair_variant_booth_u')}
+                >
+                  U booth
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <button
+                  className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
+                  onClick={() => handleContextMenuAction('delete')}
+                >
+                  {'Delete'}
+                  <span className="ml-auto text-[11px] opacity-60">Del</span>
+                </button>
+              </>
             ) : contextMenuType === 'paste' ? (
               <button
-                className="px-4 py-2 text-white hover:bg-gray-700 w-full text-left flex items-center gap-2"
+                className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
                 onClick={() => handleContextMenuAction('paste')}
               >
-                <span className="text-xs opacity-60">Ctrl+V</span>
                 {t('pasteSelected')}
+                <span className="ml-auto text-[11px] opacity-60">Ctrl+V</span>
               </button>
             ) : null}
           </div>
         )}
         
+        {/* Add Seats Modal */}
+        {showAddSeatsModal && (() => {
+          const currentLayout = interactionLayout || layout;
+          const table = currentLayout.tables?.find(t => t.id === addSeatsTableId) || null;
+          if (!table || table.type === 'chair') return null;
+          return (
+            <AddSeatsModal
+              isOpen={showAddSeatsModal}
+              onClose={() => {
+                setShowAddSeatsModal(false);
+                setAddSeatsTableId(null);
+              }}
+              table={table}
+              onSave={(guides) => {
+                const base = interactionLayout || layout;
+                const updated = {
+                  ...base,
+                  tables: base.tables.map((tb: any) => tb.id === table.id ? { ...tb, chairGuides: { ...(tb.chairGuides || {}), ...guides } } : tb)
+                };
+                // Auto-generate chairs for this table based on saved guides
+                const withChairs = autoGenerateChairsForTable(updated, table.id);
+                // Update both working layout and interaction layout (if present) to avoid later overwrites
+                setLayout(withChairs);
+                if (interactionLayout) {
+                  setInteractionLayout(withChairs);
+                }
+              }}
+            />
+          );
+        })()}
+        
+        {/* Number conflict popup (quick confirm) */}
+        {numberConflict && (() => {
+          const currentLayout = interactionLayout || layout;
+          const tbl = currentLayout.tables?.find(t => t.id === numberConflict.tableId);
+          if (!tbl) return null;
+          const anchorX = tbl.x + (tbl.width || 100) / 2;
+          const anchorY = tbl.y + (tbl.height || 100) + 8;
+          return (
+            <div
+              className="absolute z-[10100] px-3 py-2 rounded-md shadow-xl border"
+              style={{
+                left: `${anchorX}px`,
+                top: `${anchorY}px`,
+                transform: 'translateX(-50%)',
+                pointerEvents: 'auto',
+                background: document.documentElement.getAttribute('data-theme') === 'light' ? '#ffffff' : '#111827',
+                borderColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#E5E7EB' : '#374151',
+                color: document.documentElement.getAttribute('data-theme') === 'light' ? '#111827' : '#F9FAFB'
+              }}
+            >
+              <div className="text-sm mb-2">
+                Broj {numberConflict.desiredNumber} već postoji. Šta želiš?
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-500"
+                  onClick={() => resolveNumberConflict('duplicate')}
+                >
+                  Dozvoli duplikat
+                </button>
+                <button
+                  className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-500"
+                  onClick={() => resolveNumberConflict('shift')}
+                >
+                  Pomeri ostale
+                </button>
+                <button
+                  className="px-2 py-1 text-xs rounded bg-gray-600 text-white hover:bg-gray-500"
+                  onClick={() => resolveNumberConflict('cancel')}
+                >
+                  Otkaži
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        
         {/* Reservation Hover Card - only show when not editing */}
-        {hoveredTable && !isEditing && (
+        {hoveredTable && !isEditing && !isWaiterDragActive && (
           <div
             className={
-              `absolute z-[70] px-3 py-2 text-xs rounded-lg shadow-xl whitespace-nowrap select-none border ` +
+              `absolute z-[10100] px-3 py-2 text-xs rounded-lg shadow-xl whitespace-normal break-words select-none border ` +
               (document.documentElement.getAttribute('data-theme') === 'light'
                 ? 'bg-white text-gray-900 border-gray-200'
                 : 'bg-gray-900 text-white border-gray-700')
@@ -5566,10 +9059,19 @@ const Canvas: React.FC<CanvasProps> = ({
             style={{
               left: `${hoveredTable.position.x + 15}px`,
               top: `${hoveredTable.position.y + 15}px`,
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              zIndex: 10100,
+              width: 180
             }}
           >
-            <div className="font-medium text-accent">{hoveredTable.reservation.guestName}</div>
+            <div className="font-medium text-accent flex items-center gap-1">
+              {hoveredTable.reservation.guestName}
+              {hoveredTable.reservation.isVip ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500">
+                  <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/>
+                </svg>
+              ) : null}
+            </div>
             <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>{hoveredTable.reservation.time} - {hoveredTable.reservation.numberOfGuests} {t('guests')}</div>
             <div className={`text-xs px-2 py-1 rounded mt-1 ${
               hoveredTable.reservation.status === 'waiting' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/20 text-orange-300') :
@@ -5676,7 +9178,7 @@ const Canvas: React.FC<CanvasProps> = ({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 80, opacity: 0 }}
             transition={{ type: 'tween', duration: 0.25 }}
-            className={`fixed left-80 right-0 bottom-0 ${isAnyModalOpen ? 'z-[80]' : 'z-[120]'}`}
+            className={`fixed left-80 right-0 bottom-0 ${isAnyModalOpen ? 'z-[950]' : 'z-[950]'}`}
           >
             <div className="relative h-20">
               <button
@@ -5687,7 +9189,11 @@ const Canvas: React.FC<CanvasProps> = ({
               >
                 <ChevronDown size={16} />
               </button>
-              <div className="absolute inset-0">
+              <div
+                className="absolute inset-0"
+                onDoubleClick={() => setIsTimelineOverlayOpen(true)}
+                title="Double-click to open full timeline"
+              >
                 <TimelineBar selectedDate={selectedDate} />
               </div>
             </div>
@@ -5707,10 +9213,19 @@ const Canvas: React.FC<CanvasProps> = ({
         </button>
       )}
 
+      {/* Full-screen Timeline Overlay */}
+      <TimelineOverlay
+        isOpen={isTimelineOverlayOpen}
+        onClose={() => setIsTimelineOverlayOpen(false)}
+        selectedDate={selectedDate}
+      />
+
       {/* Layout List */}
-      {showLayoutList && (
-        <LayoutList onClose={() => setShowLayoutList(false)} savedLayouts={savedLayouts} loadSavedLayout={loadSavedLayout} deleteSavedLayout={deleteSavedLayout} getDefaultLayout={getDefaultLayout} currentLayoutId={currentLayoutId} />
-      )}
+      <AnimatePresence>
+        {showLayoutList && (
+          <LayoutList onClose={() => setShowLayoutList(false)} savedLayouts={savedLayouts} loadSavedLayout={loadSavedLayout} deleteSavedLayout={deleteSavedLayout} getDefaultLayout={getDefaultLayout} currentLayoutId={currentLayoutId} />
+        )}
+      </AnimatePresence>
 
       {/* Save Layout Modal */}
       {showSaveLayoutModal && (
@@ -5728,6 +9243,18 @@ const Canvas: React.FC<CanvasProps> = ({
         message={alertConfig.message}
         type={alertConfig.type}
       />
+      
+      {/* Reservation Form Overlay (keeps canvas visible beneath) */}
+      {showReservationForm && showForm && (
+        <div className="absolute inset-0 z-[1200]">
+          <ReservationForm
+            isOpen={showForm}
+            onClose={onCloseReservationForm}
+            selectedDate={selectedDate}
+            editReservation={editReservation}
+          />
+        </div>
+      )}
     </div>
   );
 };

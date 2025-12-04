@@ -128,7 +128,7 @@ html[data-theme='light'] .hex-color-preview {
 }
 
 .hex-input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: #6B7280; /* gray-500 */
 }
 
 html[data-theme='light'] .hex-input {
@@ -140,7 +140,7 @@ html[data-theme='light'] .hex-input:focus {
 }
 
 html[data-theme='light'] .hex-input::placeholder {
-  color: #9CA3AF; /* gray-400 */
+  color: #6B7280; /* gray-500 - unified across themes */
 }
 
 /* Responsive adjustments */

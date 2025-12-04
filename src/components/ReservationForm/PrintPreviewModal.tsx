@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLanguage } from '../../context/LanguageContext';
 import DirectPrintService from '../../services/directPrintService';
+import { loadFromStorage } from '../../utils/storage';
 
 interface PrintPreviewModalProps {
   isOpen: boolean;
@@ -24,12 +25,25 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   onClose, 
   reservationData 
 }) => {
-  const { t } = useLanguage();
+  const { t, currentLanguage } = useLanguage();
   const [isPrinting, setIsPrinting] = React.useState(false);
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const cancelButtonClass = isLight
+    ? 'px-4 py-2 text-gray-800 text-sm rounded hover:bg-gray-200 transition-colors'
+    : 'px-4 py-2 text-gray-300 text-sm rounded hover:bg-gray-800 transition-colors';
 
   if (!isOpen) return null;
 
   const openBrowserPrintWindow = () => {
+    const footerText = loadFromStorage<string>('posFooterText', '');
+    const footerHtml = (() => {
+      const text = footerText && footerText.trim().length > 0
+        ? footerText
+        : ['Hvala Vam na rezervaciji i ukazanom poverenju!', 'Radujemo se Vašoj poseti.'].join('\n');
+      return text.split(/\r?\n/).map(line => line.replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('<br/>');
+    })();
+    const locale = currentLanguage === 'srb' ? 'sr-RS' : 'en-GB';
+
     const printWindow = window.open('', 'PRINT', 'height=600,width=400');
     if (!printWindow) {
       throw new Error('Ne mogu da otvorim prozor za štampu.');
@@ -56,7 +70,7 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
     const formatDate = (dateString: string) => {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
     const html = `
@@ -76,24 +90,23 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               </div>
             ` : ''}
             <div class="sep"></div>
-            <div class="center bold" style="font-size:20px;">POTVRDA REZERVACIJE</div>
+            <div class="center bold" style="font-size:20px;">${t('reservationTitle')}</div>
             <div class="mt2">
-              <div class="row xs"><span>Ime gosta:</span><span><b>${reservationData.guestName}</b></span></div>
-              <div class="row xs"><span>Datum:</span><span><b>${formatDate(reservationData.date)}</b></span></div>
-              <div class="row xs"><span>Vreme:</span><span><b>${reservationData.time}</b></span></div>
-              <div class="row xs"><span>Broj gostiju:</span><span><b>${reservationData.numberOfGuests}</b></span></div>
-              ${reservationData.tableNumber ? `<div class="row xs"><span>Sto:</span><span>${reservationData.tableNumber}</span></div>` : ''}
-              ${reservationData.serviceType ? `<div class="row xs"><span>Tip usluge:</span><span>${reservationData.serviceType}</span></div>` : ''}
+              <div class="row xs"><span>${t('guestLabel')}</span><span><b>${reservationData.guestName}</b></span></div>
+              <div class="row xs"><span>${t('dateLabel')}</span><span><b>${formatDate(reservationData.date)}</b></span></div>
+              <div class="row xs"><span>${t('timeLabel')}</span><span><b>${reservationData.time}</b></span></div>
+              <div class="row xs"><span>${t('seatsLabel')}</span><span><b>${reservationData.numberOfGuests}</b></span></div>
+              ${reservationData.tableNumber ? `<div class="row xs"><span>${t('tableLabel')}</span><span>${reservationData.tableNumber}</span></div>` : ''}
+              ${reservationData.serviceType ? `<div class="row xs"><span>${t('serviceLabel')}</span><span>${reservationData.serviceType}</span></div>` : ''}
             </div>
             ${reservationData.additionalRequirements ? `
               <div class="sep"></div>
-              <div class="xs"><div class="bold mt1">Dodatne napomene:</div>${reservationData.additionalRequirements.replace(/\n/g, '<br/>')}</div>
+              <div class="xs"><div class="bold mt1">${t('notesLabel')}</div>${reservationData.additionalRequirements.replace(/\n/g, '<br/>')}</div>
             ` : ''}
             <div class="sep mt3"></div>
             <div class="center xs">
-              Hvala Vam na rezervaciji i ukazanom poverenju!<br/>
-              Radujemo se Vašoj poseti. <br/>
-              ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              ${footerHtml}<br/>
+              ${new Date().toLocaleDateString(locale)} ${new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
           <script>
@@ -142,11 +155,11 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black bg-opacity-50 flex items-center justify-center z-[12050]">
       <div className="bg-[#0A1929] rounded-lg shadow-2xl p-6 max-w-lg w-full mx-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-light text-white">
-            Pregled štampe
+            {t('printPreview')}
           </h2>
           <button
             onClick={onClose}
@@ -192,42 +205,42 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             {/* Receipt Header */}
             <div className="text-center mb-3">
               <div className="font-bold text-sm">
-                POTVRDA REZERVACIJE
+                {t('reservationTitle')}
               </div>
             </div>
             
             {/* Reservation Details */}
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <span>Ime gosta:</span>
+                <span>{t('guestLabel')}</span>
                 <span>{reservationData.guestName}</span>
               </div>
               
               <div className="flex justify-between">
-                <span>Datum:</span>
+                <span>{t('dateLabel')}</span>
                 <span>{formatDate(reservationData.date)}</span>
               </div>
               
               <div className="flex justify-between">
-                <span>Vreme:</span>
+                <span>{t('timeLabel')}</span>
                 <span>{reservationData.time}</span>
               </div>
               
               <div className="flex justify-between">
-                <span>Broj gostiju:</span>
+                <span>{t('seatsLabel')}</span>
                 <span>{reservationData.numberOfGuests}</span>
               </div>
               
               {reservationData.tableNumber && (
                 <div className="flex justify-between">
-                  <span>Sto:</span>
+                  <span>{t('tableLabel')}</span>
                   <span>{reservationData.tableNumber}</span>
                 </div>
               )}
               
               {reservationData.serviceType && (
                 <div className="flex justify-between">
-                  <span>Tip usluge:</span>
+                  <span>{t('serviceLabel')}</span>
                   <span>{reservationData.serviceType}</span>
                 </div>
               )}
@@ -237,7 +250,7 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             {reservationData.additionalRequirements && (
               <div className="mt-3 pt-2 border-t border-gray-300">
                 <div className="text-xs">
-                  <div className="font-bold mb-1">Dodatne napomene:</div>
+                  <div className="font-bold mb-1">{t('notesLabel')}</div>
                   <div className="whitespace-pre-line text-xs leading-relaxed">
                     {reservationData.additionalRequirements}
                   </div>
@@ -250,8 +263,8 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               <div className="text-xs">
                 {'='.repeat(32)}
               </div>
-              <div className="text-xs mt-1">
-                Hvala vam na rezervaciji!
+              <div className="text-xs mt-1 whitespace-pre-line">
+                {(loadFromStorage<string>('posFooterText', 'Hvala vam na rezervaciji!') || 'Hvala vam na rezervaciji!')}
               </div>
               <div className="text-xs">
                 {new Date().toLocaleDateString('sr-RS')} {new Date().toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' })}
@@ -264,19 +277,19 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         <div className="flex gap-3 justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-300 text-sm rounded hover:bg-gray-800 transition-colors"
+            className={cancelButtonClass}
           >
-            Otkaži
+            {t('cancel')}
           </button>
           <button
             onClick={handlePrint}
             disabled={isPrinting}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`px-4 py-2 text-sm rounded transition-colors font-medium flex items-center gap-2 ${isPrinting ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'text-blue-400 hover:bg-blue-500/10'}`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/>
             </svg>
-            {isPrinting ? 'Štampa...' : 'Štampaj'}
+            {isPrinting ? t('loading') : t('print')}
           </button>
         </div>
       </div>

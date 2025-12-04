@@ -89,7 +89,7 @@ const TableModal: React.FC<TableModalProps> = ({ table, onClose }) => {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center">
       <div className="bg-gray-900 rounded-lg shadow-xl w-full max-w-md m-4">
         <div className="flex items-center justify-between p-6 border-b border-gray-800">
           <h2 className="text-xl font-semibold text-white">Table Details</h2>
@@ -133,7 +133,7 @@ const TableModal: React.FC<TableModalProps> = ({ table, onClose }) => {
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-accent focus:outline-none"
+                className="respoint-select w-full"
               >
                 <option value="available">Available</option>
                 <option value="occupied">Occupied</option>

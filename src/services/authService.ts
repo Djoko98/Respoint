@@ -10,6 +10,7 @@ interface UserProfile {
   phone?: string;
   address?: string;
   logo?: string;
+  logo_light_url?: string;
   print_logo_url?: string; // Print logo URL za štampanje rezervacija
   timezone?: string;
   language?: string;
@@ -248,9 +249,12 @@ export const authService = {
       if (updates.phone !== undefined) conditionalUpdates.phone = updates.phone;
       if (updates.address !== undefined) conditionalUpdates.address = updates.address;
       if (updates.print_logo_url !== undefined) conditionalUpdates.print_logo_url = updates.print_logo_url;
+      // Optional theme-specific logo (column may not exist)
+      if ((updates as any).logo_light_url !== undefined) conditionalUpdates.logo_light_url = (updates as any).logo_light_url;
       if (updates.timezone !== undefined) conditionalUpdates.timezone = updates.timezone;
       if (updates.language !== undefined) conditionalUpdates.language = updates.language;
       if (updates.auto_archive !== undefined) conditionalUpdates.auto_archive = updates.auto_archive;
+      if ((updates as any).role_config !== undefined) (conditionalUpdates as any).role_config = (updates as any).role_config;
       // Optional role PIN hash fields (set via Account Settings). Columns may or may not exist.
       const rolePinUpdates: any = {};
       if ((updates as any).admin_pin_hash !== undefined) rolePinUpdates.admin_pin_hash = (updates as any).admin_pin_hash;

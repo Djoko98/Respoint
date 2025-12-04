@@ -138,12 +138,17 @@ export const subscriptionService = {
       return {
         canAddReservations: true,
         canAddZones: false,
-        maxReservations: 50,
+        maxReservations: 10,
         maxZones: 1
       };
     }
 
     const plan = subscription.plan;
+    // Fallbacks if DB plan limits are not set
+    const fallbackMaxReservations =
+      plan.max_reservations ?? (plan.name === 'Free' ? 10 : plan.name === 'Pro' ? 50 : null);
+    const fallbackMaxZones =
+      plan.max_zones ?? (plan.name === 'Free' ? 1 : plan.name === 'Pro' ? 3 : null);
     
     // Prebroj trenutne rezervacije i zone
     const { count: reservationCount } = await supabase
@@ -158,10 +163,10 @@ export const subscriptionService = {
       .eq('user_id', userId);
 
     return {
-      canAddReservations: !plan.max_reservations || (reservationCount || 0) < plan.max_reservations,
-      canAddZones: !plan.max_zones || (zoneCount || 0) < plan.max_zones,
-      maxReservations: plan.max_reservations,
-      maxZones: plan.max_zones,
+      canAddReservations: !fallbackMaxReservations || (reservationCount || 0) < fallbackMaxReservations,
+      canAddZones: !fallbackMaxZones || (zoneCount || 0) < fallbackMaxZones,
+      maxReservations: fallbackMaxReservations,
+      maxZones: fallbackMaxZones,
       currentReservations: reservationCount || 0,
       currentZones: zoneCount || 0
     };

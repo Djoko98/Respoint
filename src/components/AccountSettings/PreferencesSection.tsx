@@ -30,7 +30,7 @@ const PreferencesSection: React.FC<PreferencesSectionProps> = memo(({
           <select
             value={formData.language}
             onChange={(e) => onInputChange('language', e.target.value)}
-            className="w-full px-3 py-2 bg-[#000814] border border-gray-800 rounded text-sm text-white focus:border-gray-600 focus:outline-none transition-colors"
+            className="respoint-select"
           >
             <option value="eng">English</option>
             <option value="srb">Serbian</option>

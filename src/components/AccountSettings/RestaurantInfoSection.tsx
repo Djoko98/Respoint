@@ -1,19 +1,20 @@
-import React, { memo, useRef, useState } from 'react';
+import React, { memo, useContext, useRef, useState } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
+import { ThemeContext } from '../../context/ThemeContext';
 
 interface RestaurantInfoSectionProps {
   formData: {
     restaurantName: string;
     logo: string;
-    printLogoUrl: string;
+    logoLightUrl: string;
   };
   onInputChange: (field: string, value: string) => void;
   onLogoUpload: (file: File) => Promise<void>;
   onRemoveLogo: () => Promise<void>;
-  onPrintLogoUpload: (file: File) => Promise<void>;
-  onRemovePrintLogo: () => Promise<void>;
   isUploading: boolean;
-  isPrintLogoUploading: boolean;
+  onLightLogoUpload: (file: File) => Promise<void>;
+  onRemoveLightLogo: () => Promise<void>;
+  isLightLogoUploading: boolean;
 }
 
 const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
@@ -21,16 +22,24 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
   onInputChange,
   onLogoUpload,
   onRemoveLogo,
-  onPrintLogoUpload,
-  onRemovePrintLogo,
   isUploading,
-  isPrintLogoUploading
+  onLightLogoUpload,
+  onRemoveLightLogo,
+  isLightLogoUploading
 }) => {
   const { t } = useLanguage();
+  const { theme } = useContext(ThemeContext);
+  const isDarkMode = theme === 'dark';
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const printLogoFileInputRef = useRef<HTMLInputElement>(null);
+  const lightFileInputRef = useRef<HTMLInputElement>(null);
   const [logoKey, setLogoKey] = useState(() => Date.now()); // Force re-render of img element
-  const [printLogoKey, setPrintLogoKey] = useState(() => Date.now()); // Force re-render of print logo img
+  const [lightLogoKey, setLightLogoKey] = useState(() => Date.now()); // Force re-render of light logo img
+
+  const previewBaseClasses = 'w-24 h-24 rounded border overflow-hidden flex items-center justify-center transition-colors';
+  const darkPreviewClasses = `${previewBaseClasses} ${isDarkMode ? 'bg-[#000814] border-gray-800' : 'bg-[#050b16] border-gray-300/40 shadow-sm'}`;
+  const lightPreviewClasses = `${previewBaseClasses} ${isDarkMode ? 'bg-[#F3F5F9] border-white/30 shadow-inner' : 'bg-white border-gray-300 shadow-inner'}`;
+  const darkPlaceholderTextClass = `${isDarkMode ? 'text-gray-600' : 'text-gray-500'} flex flex-col items-center justify-center`;
+  const lightPlaceholderTextClass = `${isDarkMode ? 'text-gray-700' : 'text-gray-500'} flex flex-col items-center justify-center`;
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -38,15 +47,6 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
       await onLogoUpload(file);
       // Update key to force img re-render and avoid cache issues
       setLogoKey(Date.now());
-    }
-  };
-
-  const handlePrintLogoFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      await onPrintLogoUpload(file);
-      // Update key to force img re-render and avoid cache issues
-      setPrintLogoKey(Date.now());
     }
   };
 
@@ -59,18 +59,9 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
     setLogoKey(Date.now());
   };
 
-  const handleRemovePrintLogo = async () => {
-    await onRemovePrintLogo();
-    // Clear file input and update key
-    if (printLogoFileInputRef.current) {
-      printLogoFileInputRef.current.value = '';
-    }
-    setPrintLogoKey(Date.now());
-  };
-
   // Add timestamp to logo URL to prevent caching issues
   const logoUrl = formData.logo ? `${formData.logo}?t=${logoKey}` : '';
-  const printLogoUrl = formData.printLogoUrl ? `${formData.printLogoUrl}?t=${printLogoKey}` : '';
+  const logoLightUrl = formData.logoLightUrl ? `${formData.logoLightUrl}?t=${lightLogoKey}` : '';
 
   return (
     <div className="bg-[#0A1929] border border-gray-800 rounded p-6">
@@ -94,9 +85,9 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-2">{t('restaurantLogo')}</label>
+          <label className="block text-xs text-gray-500 mb-2">{t('restaurantLogoDark')}</label>
           <div className="flex items-start gap-4">
-            <div className="w-24 h-24 bg-[#000814] rounded border border-gray-800 overflow-hidden flex items-center justify-center">
+            <div className={darkPreviewClasses}>
               {logoUrl ? (
                 <img 
                   key={logoKey} // Force re-render when key changes
@@ -110,7 +101,7 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
                   }}
                 />
               ) : (
-                <div className="text-gray-600 flex flex-col items-center justify-center">
+                <div className={darkPlaceholderTextClass}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                   </svg>
@@ -150,59 +141,67 @@ const RestaurantInfoSection: React.FC<RestaurantInfoSectionProps> = memo(({
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-2">{t('printLogo')}</label>
+          <label className="block text-xs text-gray-500 mb-2">{t('restaurantLogoLight')}</label>
           <div className="flex items-start gap-4">
-            <div className="w-24 h-24 bg-[#000814] rounded border border-gray-800 overflow-hidden flex items-center justify-center">
-              {printLogoUrl ? (
+            <div className={lightPreviewClasses}>
+              {logoLightUrl ? (
                 <img 
-                  key={printLogoKey} // Force re-render when key changes
-                  src={printLogoUrl} 
-                  alt="Print logo" 
+                  key={lightLogoKey}
+                  src={logoLightUrl} 
+                  alt="Restaurant logo (light theme)" 
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    console.error('Print logo failed to load:', printLogoUrl);
-                    // Fallback to no logo display
                     e.currentTarget.style.display = 'none';
                   }}
                 />
               ) : (
-                <div className="text-gray-600 flex flex-col items-center justify-center">
+                <div className={lightPlaceholderTextClass}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/>
+                    <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                   </svg>
-                  <p className="text-xs mt-1">{t('noPrintLogo')}</p>
+                  <p className="text-xs mt-1">{t('noLogo')}</p>
                 </div>
               )}
             </div>
 
             <div className="flex-1">
               <input
-                ref={printLogoFileInputRef}
+                ref={lightFileInputRef}
                 type="file"
                 accept="image/png,image/jpeg,image/jpg"
-                onChange={handlePrintLogoFileChange}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    await onLightLogoUpload(file);
+                    setLightLogoKey(Date.now());
+                  }
+                }}
                 className="hidden"
               />
               <div className="flex gap-2">
                 <button
-                  onClick={() => printLogoFileInputRef.current?.click()}
-                  disabled={isPrintLogoUploading}
+                  onClick={() => lightFileInputRef.current?.click()}
+                  disabled={isLightLogoUploading}
                   className="px-3 py-1.5 text-sm border border-gray-700 text-gray-300 rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
-                  {isPrintLogoUploading ? t('uploading') : t('uploadLogo')}
+                  {isLightLogoUploading ? t('uploading') : t('uploadLogo')}
                 </button>
-                {formData.printLogoUrl && (
+                {formData.logoLightUrl && (
                   <button
-                    onClick={handleRemovePrintLogo}
+                    onClick={async () => {
+                      await onRemoveLightLogo();
+                      if (lightFileInputRef.current) {
+                        lightFileInputRef.current.value = '';
+                      }
+                      setLightLogoKey(Date.now());
+                    }}
                     className="px-3 py-1.5 text-sm text-red-400 rounded hover:bg-red-500/10 transition-colors"
                   >
                     {t('removeLogo')}
                   </button>
                 )}
               </div>
-              <p className="text-xs text-gray-600 mt-2">
-                {t('printLogoDescription')}
-              </p>
+              <p className="text-xs text-gray-600 mt-2">{t('logoFileDescription')}</p>
             </div>
           </div>
         </div>

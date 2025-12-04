@@ -1,0 +1,6 @@
+untrusted comment: signature from tauri secret key
+RUTOpYbpLZUbXsuCL9etN8RCPYxGzY/N3saazxXSs5BzeWOqyRdgiCQHIEdCJcNCWxNozv2XRD2/WaWj7xBx5gaJEoE1BnXj/wk=
+trusted comment: timestamp:1764162103	file:ResPoint_0.1.8_x64-setup.exe
+S1hzCyTJAxhn7XXomWnbFPQsrRdUKsq5nASdiROkj/4LKp0l/qDL9NriE1mHcad5RxSjE4jKJvClcfKc76dJBQ==
+
+

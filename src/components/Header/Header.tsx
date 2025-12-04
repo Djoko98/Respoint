@@ -9,6 +9,7 @@ import LoginModal from "../Auth/LoginModal";
 import SignupModal from "../Auth/SignupModal";
 import logoImage from "../../assets/logo.png";
 import { ThemeContext } from "../../context/ThemeContext";
+import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 
 interface HeaderProps {
   selectedDate: Date;
@@ -19,7 +20,7 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const { zones, currentZone, setCurrentZone } = useContext(ZoneContext);
   const { isAuthenticated, user } = useContext(UserContext);
   const { reservations } = useContext(ReservationContext);
-  const { t, getMonthNames, getDayNames } = useLanguage();
+  const { t, getMonthNames, getDayNames, currentLanguage } = useLanguage();
   const { theme, toggleTheme } = useContext(ThemeContext);
   const [centerDate, setCenterDate] = useState(selectedDate);
   const calendarRef = useRef<HTMLDivElement>(null);
@@ -28,19 +29,23 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const [scrollLeft, setScrollLeft] = useState(0);
   const [logoKey, setLogoKey] = useState(Date.now()); // For cache-busting
   const [logoRetryAttempted, setLogoRetryAttempted] = useState(false);
+  const label = (en: string, sr: string) => (currentLanguage === 'srb' ? sr : en);
   
   // Auth modal states
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showRoleUnlock, setShowRoleUnlock] = useState(false);
+  const [showRolesInfo, setShowRolesInfo] = useState(false);
+  const [showMonthCalendar, setShowMonthCalendar] = useState(false);
+  const [calendarViewDate, setCalendarViewDate] = useState<Date>(selectedDate);
 
-  // Update logoKey when user logo changes to force refresh
+  // Update logoKey when user logo or theme changes to force refresh
   useEffect(() => {
-    if (user?.logo) {
+    if (user?.logo || user?.logoLightUrl) {
       setLogoKey(Date.now());
       setLogoRetryAttempted(false); // reset retry when logo changes
     }
-  }, [user?.logo]);
+  }, [user?.logo, user?.logoLightUrl, theme]);
 
   // Update centerDate when selectedDate changes
   useEffect(() => {
@@ -63,6 +68,11 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const today = new Date();
   const monthNames = getMonthNames();
   const dayNames = getDayNames();
+  // Monday-first labels for modal header
+  const dayNamesMondayFirst = React.useMemo(() => {
+    const arr = Array.isArray(dayNames) ? [...dayNames] : [];
+    return arr.length === 7 ? [...arr.slice(1), arr[0]] : arr;
+  }, [dayNames]);
 
   // Check which dates have reservations
   const hasReservationsForDate = (date: Date): boolean => {
@@ -94,6 +104,12 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
     newDate.setMonth(centerDate.getMonth() + direction);
     setCenterDate(newDate);
     onDateChange(newDate);
+  };
+  // Navigate calendar modal month
+  const navigateCalendarMonth = (direction: number) => {
+    const d = new Date(calendarViewDate);
+    d.setMonth(calendarViewDate.getMonth() + direction);
+    setCalendarViewDate(d);
   };
 
   // Handle date click
@@ -138,13 +154,16 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
     // Disabled for 7-day view since all dates are visible
   };
 
-  // Generate logo URL with cache-busting
+  // Generate logo URL with cache-busting and theme-aware selection
   const getLogoUrl = () => {
-    if (!user?.logo) return logoImage;
-    
-    // Add cache-busting parameter to force refresh
-    const separator = user.logo.includes('?') ? '&' : '?';
-    return `${user.logo}${separator}v=${logoKey}`;
+    const preferred = theme === 'light'
+      ? (user?.logoLightUrl || user?.logo)
+      : (user?.logo || user?.logoLightUrl);
+
+    if (!preferred) return logoImage;
+
+    const separator = preferred.includes('?') ? '&' : '?';
+    return `${preferred}${separator}v=${logoKey}`;
   };
 
   return (
@@ -180,6 +199,24 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
         <div className="flex items-center gap-6 flex-1 justify-center">
           {/* Month/Year Display */}
           <div className="flex items-center gap-2">
+            {/* Open month calendar modal */}
+            <button
+              onClick={() => {
+                setCalendarViewDate(centerDate);
+                setShowMonthCalendar(true);
+                try { window.dispatchEvent(new CustomEvent('modal-open')); } catch {}
+              }}
+              className="text-gray-400 hover:text-white transition-colors p-1"
+              title={label('Open calendar', 'Otvori kalendar')}
+              aria-label="Open calendar"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+            </button>
             <button 
               onClick={() => navigateMonth(-1)}
               className="text-gray-400 hover:text-white transition-colors p-1"
@@ -223,6 +260,7 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                 const isCenter = idx === 3; // Center is always at index 3
                 const hasReservations = hasReservationsForDate(date);
                 const dayOfWeek = dayNames[date.getDay()];
+                const dateKeyStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
                 
                 // Calculate opacity for fadeout effect
                 const getOpacity = (index: number) => {
@@ -256,10 +294,10 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                 
                 return (
                   <div
-                    key={idx}
+                    key={dateKeyStr}
                     onClick={() => handleDateClick(date)}
                     className={`
-                      flex flex-col items-center justify-center rounded-2xl cursor-pointer
+                      flex flex-col items-center justify-center rounded-2xl cursor-pointer overflow-hidden
                       transition-all duration-300 relative flex-shrink-0
                       ${isCenter
                         ? "min-w-[48px] h-[68px] scale-110" // Larger only for selected/center
@@ -270,6 +308,10 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                     `}
                     style={{
                       background: getBackground(),
+                      backgroundRepeat: 'no-repeat',
+                      backgroundSize: '100% 100%',
+                      backgroundPosition: 'center top',
+                      backgroundClip: 'padding-box',
                       opacity: getOpacity(idx)
                     }}
                   >
@@ -345,7 +387,14 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
           </button>
           {/* Role switch button */}
           <button
-            onClick={() => setShowRoleUnlock(true)}
+            onClick={() => {
+              const hasAnyPin = Boolean(user?.hasAdminPin || user?.hasManagerPin || user?.hasWaiterPin);
+              if (!hasAnyPin) {
+                setShowRolesInfo(true);
+                return;
+              }
+              setShowRoleUnlock(true);
+            }}
             className={`${
               theme === 'light'
                 ? 'w-8 h-8 flex items-center justify-center rounded-full bg-gray-0 text-gray-900 hover:bg-gray-100 border border-gray-200 transition'
@@ -395,6 +444,179 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
       <RoleUnlockModal
         isOpen={showRoleUnlock}
         onClose={() => setShowRoleUnlock(false)}
+      />
+
+      {/* Month Calendar Modal */}
+      {showMonthCalendar && (
+        <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] z-[220]">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => {
+              setShowMonthCalendar(false);
+              try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
+            }}
+          />
+          {/* Panel */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#000814] border border-[#1E2A34] rounded-lg shadow-2xl w-[540px] max-w-[90vw]">
+            {/* Modal header with month nav - mirrors header styles */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#1E2A34]">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigateCalendarMonth(-1)}
+                  className="text-gray-400 hover:text-white transition-colors p-1"
+                  title={label('Previous month', 'Prethodni mesec')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                  </svg>
+                </button>
+                <div className="text-white font-medium min-w-[140px] text-center">
+                  <span className="uppercase text-sm">{monthNames[calendarViewDate.getMonth()]}</span>
+                  <span className="text-sm ml-2 text-gray-400">{calendarViewDate.getFullYear()}</span>
+                </div>
+                <button
+                  onClick={() => navigateCalendarMonth(1)}
+                  className="text-gray-400 hover:text-white transition-colors p-1"
+                  title={label('Next month', 'Sledeći mesec')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  setShowMonthCalendar(false);
+                  try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
+                }}
+                className="text-gray-400 hover:text-white transition-colors p-1"
+                aria-label={label('Close', 'Zatvori')}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18,6 6,18" />
+                  <path d="M6,6 18,18" />
+                </svg>
+              </button>
+            </div>
+            {/* Month grid */}
+            <div className="p-4">
+              {/* Weekday headers */}
+              <div className="grid grid-cols-7 gap-2 mb-2">
+                {dayNamesMondayFirst.map((dn, i) => (
+                  <div key={`dn-${i}`} className="text-[10px] uppercase text-center text-gray-500">{dn}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-2">
+                {(() => {
+                  const start = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth(), 1);
+                  const end = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth() + 1, 0);
+                  const startDay = start.getDay(); // 0-6 (Sun..Sat)
+                  const mondayFirstOffset = (startDay + 6) % 7; // 0 if Monday, 6 if Sunday
+                  const daysInMonth = end.getDate();
+                  // Build 5 weeks by default; expand to 6 weeks only when needed
+                  const cells: Array<Date> = [];
+                  const firstCell = new Date(start);
+                  firstCell.setDate(start.getDate() - mondayFirstOffset);
+                  const totalCells = mondayFirstOffset + daysInMonth;
+                  const weeks = totalCells <= 35 ? 5 : 6;
+                  const cellsCount = weeks * 7;
+                  for (let i = 0; i < cellsCount; i++) {
+                    const d = new Date(firstCell);
+                    d.setDate(firstCell.getDate() + i);
+                    cells.push(d);
+                  }
+                  return cells.map((d, idx) => {
+                    const isThisMonth = d.getMonth() === calendarViewDate.getMonth();
+                    const isToday = d.toDateString() === today.toDateString();
+                    const isSelected = d.toDateString() === selectedDate.toDateString();
+                    const hasRes = hasReservationsForDate(d);
+                    const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                    // Match header day tile design
+                    const getBackground = (): string => {
+                      const isLight = theme === 'light';
+                      if (isToday) {
+                        if (hasRes) {
+                          return isLight
+                            ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                            : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                        }
+                        return isLight
+                          ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
+                          : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                      }
+                      if (isSelected) {
+                        if (hasRes) {
+                          return theme === 'light'
+                            ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                            : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                        }
+                        return theme === 'light' ? '#f1f5f9' : '#1E2A34';
+                      }
+                      return theme === 'light' ? '#f8fafc' : '#1E2A34';
+                    };
+                    return (
+                      <button
+                        key={`c-${dKey}`}
+                        onClick={() => {
+                          setCenterDate(d);
+                          onDateChange(d);
+                          setShowMonthCalendar(false);
+                          try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
+                        }}
+                        className={`flex flex-col items-center justify-center rounded-2xl overflow-hidden transition-all duration-200 border justify-self-center w-[42px] h-[58px] ${hasRes && !isSelected && !isToday ? 'border-orange-500' : 'border-transparent'}`}
+                        style={{
+                          background: getBackground(),
+                          backgroundRepeat: 'no-repeat',
+                          backgroundSize: '100% 100%',
+                          backgroundPosition: 'center top',
+                          backgroundClip: 'padding-box',
+                          opacity: isThisMonth ? 1 : 0.45
+                        }}
+                        title={d.toLocaleDateString()}
+                      >
+                        <span className="text-[10px] uppercase" style={{ color: theme === 'light' ? '#64748b' : '#8891A7' }}>
+                          {dayNames[d.getDay()]}
+                        </span>
+                        <span className="text-[18px] font-normal leading-tight mt-0.5" style={{ color: theme === 'light' ? '#0f172a' : '#ffffff' }}>
+                          {d.getDate()}
+                        </span>
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="mt-4 flex items-center justify-end">
+                <button
+                  onClick={() => {
+                    const t = new Date();
+                    setCalendarViewDate(t);
+                    setCenterDate(t);
+                    onDateChange(t);
+                    setShowMonthCalendar(false);
+                    try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
+                  }}
+                  className="text-gray-300 hover:text-white transition-colors px-3 py-1.5 text-sm rounded hover:bg-gray-800"
+                >
+                  {t('today')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Info when roles are not configured */}
+      <DeleteConfirmationModal
+        isOpen={showRolesInfo}
+        onClose={() => setShowRolesInfo(false)}
+        title={label('Select Role', 'Izaberite ulogu')}
+        message={label(
+          'No roles are configured yet. Open Settings to add roles and optional PINs.',
+          'Uloge još nisu podešene. Otvorite Podešavanja i dodajte uloge i (opciono) PIN‑ove.'
+        )}
+        type="info"
+        confirmText={label('OK', 'U redu')}
       />
     </header>
   );

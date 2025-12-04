@@ -17,6 +17,9 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 -- Add address column  
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
 
+-- Add light theme logo column
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS logo_light_url TEXT;
+
 -- Add timezone column
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'Europe/Belgrade';
 

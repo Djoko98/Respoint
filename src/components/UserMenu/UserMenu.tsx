@@ -6,6 +6,7 @@ import Statistics from "../Statistics/Statistics";
 import Subscribe from "../Subscribe/Subscribe";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 import { ThemeContext } from "../../context/ThemeContext";
+import { useRolePermissions } from "../../hooks/useRolePermissions";
 
 interface UserMenuProps {
   isOpen: boolean;
@@ -13,7 +14,8 @@ interface UserMenuProps {
 }
 
 const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
-  const { user, logout, isAuthenticated, activeRole } = useContext(UserContext);
+  const { user, logout, isAuthenticated } = useContext(UserContext);
+  const { hasPermission } = useRolePermissions();
   const { t } = useLanguage();
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [showStatistics, setShowStatistics] = useState(false);
@@ -48,6 +50,10 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
     onClose();
   };
 
+  const canAccessSettings = hasPermission('access_account_settings');
+  const canAccessSubscription = hasPermission('access_subscription');
+  const canViewStatistics = hasPermission('access_statistics');
+
   const menuItems = [
     {
       icon: (
@@ -56,7 +62,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
         </svg>
       ),
       label: t('accountSettings'),
-      action: handleAccountSettings
+      action: handleAccountSettings,
+      enabled: canAccessSettings
     },
     {
       icon: (
@@ -65,7 +72,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
         </svg>
       ),
       label: t('subscribe'),
-      action: handleSubscribe
+      action: handleSubscribe,
+      enabled: canAccessSubscription
     },
     {
       icon: (
@@ -74,7 +82,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
         </svg>
       ),
       label: t('statistics'),
-      action: handleStatistics
+      action: handleStatistics,
+      enabled: canViewStatistics
     },
     {
       icon: (
@@ -84,7 +93,8 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
       ),
       label: t('logout'),
       action: handleLogout,
-      className: isLight ? "text-red-600 hover:text-red-700" : "text-red-400 hover:text-red-300"
+      className: isLight ? "text-red-600 hover:text-red-700" : "text-red-400 hover:text-red-300",
+      enabled: true
     }
   ];
 
@@ -95,12 +105,12 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 z-40" 
+            className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] z-[1300]" 
             onClick={onClose}
           />
           
           {/* Menu */}
-          <div className={`absolute right-0 top-full mt-2 w-64 rounded-lg shadow-xl border z-[80] ${isLight ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800'}`}>
+          <div className={`absolute right-0 top-full mt-2 w-64 rounded-lg shadow-xl border z-[1310] ${isLight ? 'bg-white border-gray-200' : 'bg-gray-900 border-gray-800'}`}>
             {/* User Info */}
             <div className={`p-4 border-b ${isLight ? 'border-gray-200' : 'border-gray-800'}`}>
               <p className={`${isLight ? 'text-gray-900' : 'text-white'} font-medium truncate`} title={user?.name}>{user?.name}</p>
@@ -123,9 +133,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
             {/* Menu Items */}
             <div className="py-2">
               {menuItems.map((item, index) => {
-                const isDisabled =
-                  ((activeRole === 'manager' || activeRole === 'waiter') &&
-                   (item.label === t('accountSettings') || item.label === t('subscribe')));
+                const isDisabled = item.enabled === false;
                 return (
                   <button
                     key={index}
@@ -136,9 +144,9 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
                         onClose();
                       }
                     }}
-                    className={`w-full px-4 py-3 flex items-center gap-3 transition ${
+                  className={`w-full px-4 py-3 flex items-center gap-3 transition ${
                       isDisabled
-                        ? (isLight ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 cursor-not-allowed')
+                        ? (isLight ? 'text-gray-400 opacity-50 cursor-not-allowed' : 'text-gray-600 cursor-not-allowed')
                         : (item.className || (isLight ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-50' : 'text-gray-300 hover:text-white hover:bg-gray-800'))
                     }`}
                   >

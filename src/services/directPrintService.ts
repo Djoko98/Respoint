@@ -257,12 +257,29 @@ export class DirectPrintService {
 
     // Footer
     if (options.includeFooter !== false) {
+      // Prefer new single-field footer text, fallback to legacy two-line values
+      const footerText = loadFromStorage<string>('posFooterText', '');
+      const footerLine1Legacy = loadFromStorage<string>('posFooterLine1', 'Hvala na rezervaciji!');
+      const footerLine2Legacy = loadFromStorage<string>('posFooterLine2', 'Radujemo se vasoj poseti.');
       content += '\n' + this.printLine('=', width) + '\n';
       content += this.COMMANDS.CENTER_ALIGN;
       // Make footer slightly larger for readability
       content += this.COMMANDS.DOUBLE_HEIGHT;
-      content += this.centerText('Hvala na rezervaciji!', width) + '\n';
-      content += this.centerText('Radujemo se vasoj poseti.', width) + '\n';
+      if (footerText && footerText.trim().length > 0) {
+        // Split on newlines, and wrap each line to printer width for centering
+        const rawLines = footerText.split(/\r?\n/);
+        const lines: string[] = [];
+        for (const line of rawLines) {
+          const wrapped = this.wrapText(line, Math.floor(width * 0.9)).split('\n');
+          lines.push(...wrapped);
+        }
+        for (const ln of lines.slice(0, 5)) {
+          if (ln.trim().length > 0) content += this.centerText(ln, width) + '\n';
+        }
+      } else {
+        if (footerLine1Legacy) content += this.centerText(footerLine1Legacy, width) + '\n';
+        if (footerLine2Legacy) content += this.centerText(footerLine2Legacy, width) + '\n';
+      }
       content += this.COMMANDS.NORMAL_SIZE;
       
       // Print timestamp

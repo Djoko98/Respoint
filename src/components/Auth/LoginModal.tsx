@@ -85,7 +85,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
   }, []);
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
       <div className="bg-gray-900 rounded-lg shadow-xl w-full max-w-md">
         <div className="p-6">
           <h2 className="text-2xl font-bold text-white mb-6">Welcome Back</h2>

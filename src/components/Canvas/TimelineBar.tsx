@@ -79,6 +79,7 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
   const { reservations } = useContext(ReservationContext);
   const { currentZone } = useContext(ZoneContext);
   const { zoneLayouts } = useContext(LayoutContext);
+  const timelineRef = React.useRef<HTMLDivElement>(null);
 
   // Format date to local YYYY-MM-DD to avoid timezone issues
   const formatDate = (date: Date) => {
@@ -145,45 +146,25 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
     return '#f97316'; // Orange for waiting
   };
 
-  // Calculate position percentage to match the new hour distribution
+  // Calculate position percentage as if full 24h track (00:00 → 24:00) exists.
+  // We render labels only for 01h..23h, which leaves equal one-hour margins on both sides.
   const getMarkerPosition = (hour: number, minute: number = 0) => {
-    // Convert to time index (0-23 with decimal for minutes)
-    let timeIndex = hour + minute / 60;
-
-    // Handle wrap-around for times after 23:30
-    if (timeIndex >= 23.5) {
-      timeIndex = timeIndex - 24;
-    }
-
-    // Map time from [-0.5, 23.5) to [0, 100]
-    // The range is 24 hours total.
-    const position = ((timeIndex + 0.5) / 24) * 100;
-    
-    return Math.max(0, Math.min(100, position)); // Clamp between 0% and 100%
+    const totalMinutes = Math.max(0, Math.min(24 * 60, Math.floor(hour) * 60 + Math.floor(minute)));
+    return (totalMinutes / (24 * 60)) * 100;
   };
 
-  // Generate hours array to display
-  const hours = Array.from({ length: 24 }, (_, i) => (i + 23) % 24); // Start from 23:00 for display
-  hours[0] = 23;
+  // Generate hours array to display: 01h..23h (hide 00h)
+  const hours = Array.from({ length: 23 }, (_, i) => i + 1);
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-[#000814] border-t border-[#1E2A34] h-full shadow-lg z-30 overflow-visible">
-      <div className="relative w-full h-full flex items-center px-4">
+    <div className="absolute bottom-0 left-0 right-0 bg-[#000814] border-t border-[#1E2A34] h-full z-[10060] overflow-visible">
+      <div ref={timelineRef} className="relative w-full h-full flex items-center">
         
         {/* Hour marks */}
-        <div className="absolute inset-x-4 inset-y-0 flex items-center">
-          {hours.map((hour, index) => {
-            // Calculate position for even distribution across available width
-            // We are displaying 24 hours starting from 23:00
-            const displayHour = (23 + index) % 24;
-            let timeIndex = displayHour;
-
-            // Adjust for wrap-around visualization
-            if (timeIndex >= 23.5) {
-                timeIndex -= 24;
-            }
-            
-            const leftPosition = `${getMarkerPosition(displayHour, 0)}%`;
+        <div className="absolute inset-x-0 inset-y-0 flex items-center">
+          {hours.map((hour) => {
+            // Position each hour label based on its actual hour index (01..23)
+            const leftPosition = `${getMarkerPosition(hour, 0)}%`;
             
             return (
               <div 
@@ -206,26 +187,61 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
           })}
         </div>
 
-        {/* Current time indicator - precise to the minute within padded area */}
-        {selectedDate && formatDate(selectedDate) === formatDate(new Date()) && (
-          <div className="absolute top-0 bottom-0 left-4 right-4">
-            <div 
-              className="absolute top-0 bottom-0"
-              style={{
-                left: `${getMarkerPosition(new Date().getHours(), new Date().getMinutes())}%`,
-                transform: 'translateX(-50%)'
-              }}
-            >
-              <TimeMarker color="#6b7280" needleHeight={80} />
+        {/* Current time indicator - match TimelineOverlay (blue line + label) */}
+        {selectedDate && formatDate(selectedDate) === formatDate(new Date()) && (() => {
+          const hoursNow = new Date().getHours();
+          const minutesNow = new Date().getMinutes();
+          const leftPosition = `${getMarkerPosition(hoursNow, minutesNow)}%`;
+          const nowLabel = `${hoursNow.toString().padStart(2, '0')}:${minutesNow.toString().padStart(2, '0')}`;
+          return (
+            <div className="absolute top-0 bottom-0 left-0 right-0 pointer-events-none">
+              <div 
+                className="absolute top-0 bottom-0 z-50"
+                style={{ left: leftPosition, transform: 'translateX(-50%)' }}
+              >
+                <div className="w-[2px] h-full bg-blue-400/60" />
+                <div className="absolute top-9" style={{ left: 0, transform: 'translateX(-50%)' }}>
+                  <div className="px-2 py-0.5 rounded border text-[11px] select-none"
+                       style={{
+                         backgroundColor: '#3b82f6', // blue-500
+                         borderColor: '#60a5fa',      // blue-400
+                         color: '#ffffff',
+                         boxShadow: '0 1px 2px rgba(0,0,0,0.25)'
+                       }}>
+                    {nowLabel}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Reservation markers - positioned by exact time within the padded area */}
         {todaysReservations.map((reservation) => {
           const [hours, minutes] = reservation.time.split(':').map(Number);
           // Use same positioning logic as hour marks
-          const leftPosition = `${getMarkerPosition(hours, minutes)}%`;
+          const leftPositionPercent = getMarkerPosition(hours, minutes);
+          const leftPosition = `${leftPositionPercent}%`;
+          const tooltipWidth = 180;
+          const paddingPx = 12;
+          const containerWidth = timelineRef.current?.offsetWidth || 0;
+          let tooltipOffsetPx = 0;
+          if (containerWidth > 0) {
+            const markerPx = (leftPositionPercent / 100) * containerWidth;
+            const leftEdge = markerPx - tooltipWidth / 2;
+            const rightEdge = markerPx + tooltipWidth / 2;
+            if (leftEdge < paddingPx) {
+              tooltipOffsetPx = paddingPx - leftEdge;
+            } else if (rightEdge > containerWidth - paddingPx) {
+              tooltipOffsetPx = (containerWidth - paddingPx) - rightEdge;
+            }
+          }
+          const tooltipPositionStyle: React.CSSProperties = {
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginLeft: tooltipOffsetPx,
+            width: tooltipWidth
+          };
           
           const statusLabels = {
             waiting: t('waiting'),
@@ -238,7 +254,7 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
           return (
             <div
               key={reservation.id}
-              className="absolute top-0 bottom-0 left-4 right-4"
+              className="absolute top-0 bottom-0 left-0 right-0"
             >
               <div 
                 className="absolute"
@@ -256,10 +272,20 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
                   />
                   
                   {/* Tooltip */}
-                  <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 px-3 py-2 text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border pointer-events-none select-none ${
-                    document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white text-gray-900 border-gray-200' : 'bg-gray-900 text-white border-gray-700'
-                  }`}>
-                  <div className="font-medium text-accent">{reservation.guestName}</div>
+                  <div
+                    className={`absolute bottom-full mb-3 px-3 py-2 text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-normal break-words overflow-visible z-[10070] border pointer-events-none select-none ${
+                      document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-white text-gray-900 border-gray-200' : 'bg-gray-900 text-white border-gray-700'
+                    }`}
+                    style={tooltipPositionStyle}
+                  >
+                  <div className="font-medium text-accent flex items-center gap-1 flex-wrap">
+                    {reservation.guestName}
+                    {reservation.isVip ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500">
+                        <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/>
+                      </svg>
+                    ) : null}
+                  </div>
                   <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>{reservation.time} - {reservation.numberOfGuests} {t('guests')}</div>
                   <div className={`text-xs px-2 py-1 rounded mt-1 ${
                     reservation.status === 'waiting' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/20 text-orange-300') :
@@ -284,10 +310,28 @@ const TimelineBar: React.FC<TimelineBarProps> = ({ selectedDate }) => {
                     <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-500 italic mt-1' : 'text-gray-300 italic mt-1'}>"{reservation.notes}"</div>
                   )}
                   
-                  {/* Tooltip arrow */}
-                  <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                    document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t-white' : 'border-t-gray-900'
-                  }`} />
+                  {/* Tooltip arrow (border outline) */}
+                  <div
+                    className={`absolute top-full w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent z-[10070] ${
+                      document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t-gray-200' : 'border-t-gray-700'
+                    }`}
+                    style={{
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      marginLeft: Math.max(Math.min(-tooltipOffsetPx, tooltipWidth / 2 - 11), -(tooltipWidth / 2 - 8))
+                    }}
+                  />
+                  {/* Tooltip arrow (fill) */}
+                  <div
+                    className={`absolute top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
+                      document.documentElement.getAttribute('data-theme') === 'light' ? 'border-t-white' : 'border-t-gray-900'
+                    }`}
+                    style={{
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      marginLeft: Math.max(Math.min(-tooltipOffsetPx, tooltipWidth / 2 - 11), -(tooltipWidth / 2 - 8))
+                    }}
+                  />
                 </div>
                 </div>
               </div>

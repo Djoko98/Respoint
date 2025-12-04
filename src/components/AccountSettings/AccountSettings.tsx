@@ -1,7 +1,7 @@
 import React, { useState, useContext, useCallback, useMemo } from 'react';
 import { UserContext } from '../../context/UserContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { User } from '../../types/user';
+import { User, RoleConfigEntry } from '../../types/user';
 import { saveToStorage, loadFromStorage } from '../../utils/storage';
 import { storageService } from '../../services/storageService';
 import { authService } from '../../services/authService';
@@ -19,6 +19,9 @@ interface AccountSettingsProps {
   onClose: () => void;
 }
 
+const cloneRoleConfig = (roles?: RoleConfigEntry[]) =>
+  roles ? roles.map(role => ({ ...role, permissions: [...role.permissions] })) : [];
+
 const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, onClose }) => {
   const { user, setUser } = useContext(UserContext);
   const { t, setLanguage } = useLanguage();
@@ -32,12 +35,14 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
     address: user?.address || '',
     logo: user?.logo || '',
     printLogoUrl: user?.printLogoUrl || '', // Print logo URL
+    logoLightUrl: user?.logoLightUrl || '',
     timezone: user?.timezone || 'Europe/Belgrade',
     language: user?.language || 'eng',
     autoArchive: user?.autoArchive ?? true,
     adminPin: '',
     managerPin: '',
-    waiterPin: ''
+    waiterPin: '',
+    roleConfig: cloneRoleConfig(user?.roleConfig),
   });
 
   const [passwordData, setPasswordData] = useState({
@@ -48,6 +53,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
 
   const [isUploading, setIsUploading] = useState(false);
   const [isPrintLogoUploading, setIsPrintLogoUploading] = useState(false);
+  const [isLightLogoUploading, setIsLightLogoUploading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   
   // GLOBAL MODAL INPUT LOCK FIX: Delayed modal content rendering
@@ -90,9 +96,11 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
         address: user?.address || '',
         logo: user?.logo || '', // Logo URL se učitava iz user objekta (iz logo kolone)
         printLogoUrl: user?.printLogoUrl || '', // Print logo URL za štampanje
+        logoLightUrl: user?.logoLightUrl || '',
         timezone: user?.timezone || 'Europe/Belgrade',
         language: user?.language || 'eng',
-        autoArchive: user?.autoArchive ?? true
+        autoArchive: user?.autoArchive ?? true,
+        roleConfig: cloneRoleConfig(user?.roleConfig),
       });
       setHasChanges(false);
     }
@@ -119,6 +127,19 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
   const showAlert = useCallback((title: string, message: string, type: 'info' | 'error' | 'success' = 'error') => {
     setAlertConfig({ title, message, type });
     setShowAlertModal(true);
+  }, []);
+
+  // React to external section changes (e.g., POS footer saved) to enable Save Changes
+  React.useEffect(() => {
+    const onExternalChange = () => setHasChanges(true);
+    try {
+      window.addEventListener('account-settings-changed', onExternalChange as any);
+    } catch {}
+    return () => {
+      try {
+        window.removeEventListener('account-settings-changed', onExternalChange as any);
+      } catch {}
+    };
   }, []);
 
   // Optimized input change handler
@@ -253,6 +274,69 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
     );
   }, [formData.logo, showAlert]);
 
+  // Upload light theme logo handler
+  const handleLightLogoUpload = useCallback(async (file: File) => {
+    if (!file || !user?.id) return;
+
+    if (!file.type.startsWith('image/')) {
+      showAlert(
+        'Invalid File Type',
+        'Please upload an image file (PNG or JPG)',
+        'error'
+      );
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showAlert(
+        'File Too Large',
+        'File size must be less than 5MB',
+        'error'
+      );
+      return;
+    }
+
+    setIsLightLogoUploading(true);
+    try {
+      const lightUrl = await storageService.uploadLightLogo(user.id, file);
+      if (lightUrl) {
+        const timestampedUrl = `${lightUrl}?v=${Date.now()}`;
+        setFormData(prev => ({ ...prev, logoLightUrl: timestampedUrl }));
+        setHasChanges(true);
+        showAlert('Upload Successful', 'Logo uploaded and saved successfully', 'success');
+      } else {
+        showAlert('Upload Error', 'Error uploading logo. Please try again.', 'error');
+      }
+    } catch (error) {
+      console.error('Light logo upload error:', error);
+      showAlert('Upload Error', 'Error uploading file', 'error');
+    } finally {
+      setIsLightLogoUploading(false);
+    }
+  }, [user?.id, showAlert]);
+
+  // Remove light theme logo handler
+  const handleRemoveLightLogo = useCallback(async () => {
+    console.log('🗑️ Remove light theme logo requested, current:', formData.logoLightUrl);
+    if (formData.logoLightUrl && formData.logoLightUrl.includes('restaurant-logos')) {
+      try {
+        const cleanUrl = formData.logoLightUrl.split('?')[0];
+        const ok = await storageService.deleteLightLogo(cleanUrl);
+        if (!ok) {
+          showAlert('Delete Error', 'Failed to remove logo file from storage', 'error');
+          return;
+        }
+      } catch (e) {
+        console.error('❌ Error deleting light logo:', e);
+        showAlert('Delete Error', 'Error removing logo file', 'error');
+        return;
+      }
+    }
+    setFormData(prev => ({ ...prev, logoLightUrl: '' }));
+    setHasChanges(true);
+    showAlert('Logo Removed', 'Logo removed successfully', 'success');
+  }, [formData.logoLightUrl, showAlert]);
+
   // Optimized change password handler
   const handleChangePassword = useCallback(async () => {
     if (passwordData.newPassword !== passwordData.confirmPassword) {
@@ -313,37 +397,70 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
       // Clean logo URL from timestamp parameters before saving
       const cleanLogoUrl = formData.logo ? formData.logo.split('?')[0] : '';
       const cleanPrintLogoUrl = formData.printLogoUrl ? formData.printLogoUrl.split('?')[0] : '';
+      const cleanLogoLightUrl = formData.logoLightUrl ? formData.logoLightUrl.split('?')[0] : '';
+      const normalizedRoleConfig = (formData.roleConfig || []).map(role => ({
+        id: role.id,
+        name: role.name.trim(),
+        permissions: [...(role.permissions || [])],
+        pinHash: role.pinHash || null
+      }));
       
-      // Update profile in Supabase database
-      const result = await authService.updateProfile(user.id, {
+      // Build update payload, allowing explicit nulls to clear PINs
+      const updatePayload: any = {
         restaurant_name: formData.restaurantName,
         name: formData.name,
         phone: formData.phone,
         address: formData.address,
         logo: cleanLogoUrl, // Save clean URL without timestamp
         print_logo_url: cleanPrintLogoUrl, // Save clean print logo URL
+        logo_light_url: cleanLogoLightUrl,
         timezone: formData.timezone,
         language: formData.language,
         auto_archive: formData.autoArchive,
-        // These are optional and saved only if user set them; hashing handled inside section and stored in formData as hashes
-        ...(formData as any).admin_pin_hash ? { admin_pin_hash: (formData as any).admin_pin_hash } : {},
-        ...(formData as any).manager_pin_hash ? { manager_pin_hash: (formData as any).manager_pin_hash } : {},
-        ...(formData as any).waiter_pin_hash ? { waiter_pin_hash: (formData as any).waiter_pin_hash } : {}
-      });
+        role_config: normalizedRoleConfig
+      };
+
+      // Include pin fields if they were provided, even if null (to clear)
+      if (Object.prototype.hasOwnProperty.call(formData as any, 'admin_pin_hash')) {
+        (updatePayload as any).admin_pin_hash = (formData as any).admin_pin_hash;
+      }
+      if (Object.prototype.hasOwnProperty.call(formData as any, 'manager_pin_hash')) {
+        (updatePayload as any).manager_pin_hash = (formData as any).manager_pin_hash;
+      }
+      if (Object.prototype.hasOwnProperty.call(formData as any, 'waiter_pin_hash')) {
+        (updatePayload as any).waiter_pin_hash = (formData as any).waiter_pin_hash;
+      }
+
+      // Update profile in Supabase database
+      const result = await authService.updateProfile(user.id, updatePayload);
 
       if (result.success) {
         // Force logo refresh by adding version parameter for immediate UI update
         const logoWithVersion = cleanLogoUrl ? `${cleanLogoUrl}?v=${Date.now()}` : '';
         const printLogoWithVersion = cleanPrintLogoUrl ? `${cleanPrintLogoUrl}?v=${Date.now()}` : '';
+        const logoLightWithVersion = cleanLogoLightUrl ? `${cleanLogoLightUrl}?v=${Date.now()}` : '';
         
+        // Determine updated PIN flags; only change flags for fields that were provided
+        const adminPinSet = Object.prototype.hasOwnProperty.call(formData as any, 'admin_pin_hash')
+          ? Boolean((formData as any).admin_pin_hash)
+          : user.hasAdminPin;
+        const managerPinSet = Object.prototype.hasOwnProperty.call(formData as any, 'manager_pin_hash')
+          ? Boolean((formData as any).manager_pin_hash)
+          : user.hasManagerPin;
+        const waiterPinSet = Object.prototype.hasOwnProperty.call(formData as any, 'waiter_pin_hash')
+          ? Boolean((formData as any).waiter_pin_hash)
+          : user.hasWaiterPin;
+
         const updatedUser: User = {
           ...user,
           ...formData,
           logo: logoWithVersion, // Use versioned URL for immediate refresh, but save clean URL to DB
           printLogoUrl: printLogoWithVersion, // Use versioned print logo URL for immediate refresh
-          hasAdminPin: Boolean((formData as any).admin_pin_hash) || user.hasAdminPin,
-          hasManagerPin: Boolean((formData as any).manager_pin_hash) || user.hasManagerPin,
-          hasWaiterPin: Boolean((formData as any).waiter_pin_hash) || user.hasWaiterPin,
+          logoLightUrl: logoLightWithVersion,
+          hasAdminPin: adminPinSet,
+          hasManagerPin: managerPinSet,
+          hasWaiterPin: waiterPinSet,
+          roleConfig: normalizedRoleConfig,
         };
         setUser(updatedUser);
 
@@ -356,7 +473,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
         const users = loadFromStorage<any[]>('restaurant-users', []);
         const userIndex = users.findIndex(u => u.id === user.id);
         if (userIndex !== -1) {
-          users[userIndex] = { ...users[userIndex], ...formData, logo: cleanLogoUrl, printLogoUrl: cleanPrintLogoUrl };
+          users[userIndex] = { ...users[userIndex], ...formData, logo: cleanLogoUrl, printLogoUrl: cleanPrintLogoUrl, logoLightUrl: cleanLogoLightUrl };
           saveToStorage('restaurant-users', users);
         }
 
@@ -402,9 +519,11 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
       address: user?.address || '',
       logo: user?.logo || '',
       printLogoUrl: user?.printLogoUrl || '', // Print logo URL za štampanje
+      logoLightUrl: user?.logoLightUrl || '',
       timezone: user?.timezone || 'Europe/Belgrade',
       language: user?.language || 'eng',
-      autoArchive: user?.autoArchive ?? true
+      autoArchive: user?.autoArchive ?? true,
+      roleConfig: cloneRoleConfig(user?.roleConfig),
     });
     setHasChanges(false);
     onClose();
@@ -557,8 +676,8 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
   if (!isOpen || !showModalContent) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center p-4">
-      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
+      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <h2 className="text-xl font-light text-white tracking-wide">{t('accountSettingsTitle')}</h2>
@@ -580,15 +699,15 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
               formData={{
                 restaurantName: formData.restaurantName,
                 logo: formData.logo,
-                printLogoUrl: formData.printLogoUrl
+                logoLightUrl: formData.logoLightUrl
               }}
               onInputChange={handleInputChange}
               onLogoUpload={handleLogoUpload}
               onRemoveLogo={handleRemoveLogo}
-              onPrintLogoUpload={handlePrintLogoUpload}
-              onRemovePrintLogo={handleRemovePrintLogo}
               isUploading={isUploading}
-              isPrintLogoUploading={isPrintLogoUploading}
+              onLightLogoUpload={handleLightLogoUpload}
+              onRemoveLightLogo={handleRemoveLightLogo}
+              isLightLogoUploading={isLightLogoUploading}
             />
 
             {/* Owner Information Section */}
@@ -624,18 +743,22 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
             />
 
             {/* POS Printer Settings */}
-            <PrinterSettingsSection />
+            <PrinterSettingsSection
+              printLogoUrl={formData.printLogoUrl}
+              onPrintLogoUpload={handlePrintLogoUpload}
+              onRemovePrintLogo={handleRemovePrintLogo}
+              isPrintLogoUploading={isPrintLogoUploading}
+            />
 
             {/* Role PINs Section */}
             <RolePasswordsSection
-              onSetHashes={(hashes) => {
-                setFormData(prev => ({ ...prev, ...(hashes as any) }));
+              roles={formData.roleConfig || []}
+              onRolesChange={(roles) => {
+                setFormData(prev => ({ ...prev, roleConfig: roles }));
                 setHasChanges(true);
               }}
-              hasAdminPin={!!user?.hasAdminPin}
-              hasManagerPin={!!user?.hasManagerPin}
-              hasWaiterPin={!!user?.hasWaiterPin}
               isAdmin={user?.role === 'admin'}
+              isOpen={isOpen}
             />
 
             {/* Advanced Options Section */}
@@ -657,11 +780,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = React.memo(({ isOpen, on
           <button
             onClick={handleSave}
             disabled={!hasChanges}
-            className={`px-4 py-2 text-sm rounded transition-colors font-medium ${
-              hasChanges
-                ? 'text-blue-400 hover:bg-blue-500/10'
-                : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-            }`}
+            className="px-4 py-2 text-sm rounded transition-colors font-medium text-blue-400 hover:bg-blue-500/10 disabled:opacity-45 disabled:cursor-not-allowed"
           >
             {t('saveChanges')}
           </button>

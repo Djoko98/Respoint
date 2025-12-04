@@ -94,6 +94,47 @@ export const storageService = {
     }
   },
 
+  // Upload light-theme app logo file
+  async uploadLightLogo(restaurantId: string, file: File): Promise<string | null> {
+    try {
+      console.log('⬆️ Starting light logo upload:', {
+        restaurantId,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      });
+
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const fileName = `logos/${restaurantId}/logo-light.${fileExt}`;
+
+      console.log('📁 Light logo upload path:', fileName);
+
+      const { data, error } = await supabase.storage
+        .from(LOGO_BUCKET)
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (error) {
+        console.error('❌ Light logo upload error:', error);
+        return null;
+      }
+
+      console.log('✅ Light logo uploaded successfully:', data);
+
+      const { data: { publicUrl } } = supabase.storage
+        .from(LOGO_BUCKET)
+        .getPublicUrl(fileName);
+
+      console.log('🔗 Generated light logo public URL:', publicUrl);
+      return publicUrl;
+    } catch (error) {
+      console.error('❌ Exception in uploadLightLogo:', error);
+      return null;
+    }
+  },
+
   // Obriši logo fajl
   async deleteLogo(logoUrl: string): Promise<boolean> {
     try {
@@ -157,6 +198,37 @@ export const storageService = {
       return true;
     } catch (error) {
       console.error('❌ Error in deletePrintLogo:', error);
+      return false;
+    }
+  },
+
+  // Obriši light logo fajl
+  async deleteLightLogo(lightLogoUrl: string): Promise<boolean> {
+    try {
+      console.log('🗑️ Attempting to delete light logo:', lightLogoUrl);
+
+      const bucketIndex = lightLogoUrl.indexOf('/restaurant-logos/');
+      if (bucketIndex === -1) {
+        console.error('❌ Invalid light logo URL format:', lightLogoUrl);
+        return false;
+      }
+
+      const filePath = lightLogoUrl.substring(bucketIndex + '/restaurant-logos/'.length);
+      console.log('📁 Extracted light logo file path:', filePath);
+
+      const { error } = await supabase.storage
+        .from(LOGO_BUCKET)
+        .remove([filePath]);
+
+      if (error) {
+        console.error('❌ Error deleting light logo from storage:', error);
+        return false;
+      }
+
+      console.log('✅ Light logo deleted successfully from storage');
+      return true;
+    } catch (error) {
+      console.error('❌ Error in deleteLightLogo:', error);
       return false;
     }
   },

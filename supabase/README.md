@@ -27,6 +27,7 @@
 - `restaurant_name` - Text (naziv restorana)
 - `role` - Text (uloga korisnika)
 - `logo` - Text (URL loga za header prikaz, opciono)
+- `logo_light_url` - Text (URL za svetlu temu, opciono; ako nema, koristi `logo`)
 - `print_logo_url` - Text (URL loga za štampanje i PDF dokumente, opciono)
 - `phone` - Text (telefon, opciono)
 - `address` - Text (adresa, opciono)
@@ -172,6 +173,26 @@ restaurant-logos bucket:
 ├── logos/{user_id}/
 │   ├── logo.{ext}        # Header logo
 │   └── print-logo.{ext}  # Print logo (novo)
+```
+
+## Light/Dark Logo (Header) Funkcionalnost
+
+### Kolona `logo_light_url` u `profiles` tabeli
+
+Dodata je kolona za logo koji se koristi kada je aplikacija u svetloj temi. Ako nije postavljen, aplikacija koristi osnovni `logo`.
+
+```sql
+ALTER TABLE profiles 
+ADD COLUMN IF NOT EXISTS logo_light_url TEXT;
+```
+
+### Storage Organizacija (header logo)
+
+```
+restaurant-logos bucket:
+├── logos/{user_id}/
+│   ├── logo.{ext}         # Header logo (tamna tema)
+│   └── logo-light.{ext}   # Header logo (svetla tema)
 ```
 
 ### Komponente Uključene

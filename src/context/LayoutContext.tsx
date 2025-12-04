@@ -73,10 +73,41 @@ export interface Table {
   y: number;
   width?: number;
   height?: number;
-  type?: 'rectangle' | 'circle';
+  type?: 'rectangle' | 'circle' | 'chair';
+  chairVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
   rotation?: number;
   color?: string;
   status?: 'available' | 'occupied' | 'inactive';
+  // If this element is a generated chair, it may reference the table it's attached to
+  attachedToTableId?: string;
+  // When true (for non-chair tables), attached chairs should move/rotate/scale/copy with the table
+  chairsLocked?: boolean;
+  chairGuides?: {
+    top?: number;
+    right?: number;
+    bottom?: number;
+    left?: number;
+    // Optional per-side chair variant selection
+    topVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    rightVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    bottomVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    leftVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    // Optional corner toggles
+    cornerTL?: boolean;
+    cornerTR?: boolean;
+    cornerBR?: boolean;
+    cornerBL?: boolean;
+    // Optional per-corner variant selection
+    cornerTLVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerTRVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerBRVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    cornerBLVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    // Circular tables: seats distributed around circumference
+    circleCount?: number;
+    circleStartDeg?: number; // starting angle offset in degrees
+    circleVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
+    circleVariants?: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'>;
+  };
 }
 
 export interface Wall {
@@ -461,7 +492,8 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const getDefaultLayout = useCallback((): SavedLayout | null => {
     if (!currentZone) return null;
     const zoneSavedLayouts = savedLayouts[currentZone.id] || [];
-    return zoneSavedLayouts.find(l => l.is_default) || null;
+    // Prefer explicitly marked default; otherwise fall back to the most recent saved layout (index 0)
+    return zoneSavedLayouts.find(l => l.is_default) || zoneSavedLayouts[0] || null;
   }, [currentZone, savedLayouts]);
 
   // Always load default layout when switching to a zone
@@ -492,6 +524,29 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       }
     }
   }, [currentZone?.id, isEditingInternal]); // Re-run when zone changes or when exiting edit mode
+
+  // Robust fallback: when savedLayouts arrive later, ensure current zone shows its latest/default layout
+  useEffect(() => {
+    if (!currentZone || isEditingInternal) return;
+    const current = undoRedoLayouts[currentZone.id];
+    const isEmpty = !current || (
+      (!current.tables || current.tables.length === 0) &&
+      (!current.walls || current.walls.length === 0) &&
+      (!current.texts || current.texts.length === 0)
+    );
+    if (isEmpty) {
+      const fallback = getDefaultLayout();
+      if (fallback) {
+        setUndoRedoState({
+          ...zoneLayouts,
+          [currentZone.id]: fallback.layout
+        });
+        setCurrentLayoutId(fallback.id);
+        setLayoutAtEditStart(null);
+        console.log('Applied fallback layout after savedLayouts change for zone:', currentZone.id);
+      }
+    }
+  }, [savedLayouts, currentZone?.id, isEditingInternal, undoRedoLayouts, zoneLayouts, getDefaultLayout, setUndoRedoState]);
   
   const saveLayoutAs = async (name: string, isDefault: boolean = false) => {
     if (!currentZone || !user?.id) {
@@ -684,6 +739,44 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         await layoutsService.saveLayoutForZone(user.id, currentZone.id, currentLayout);
         // Reset layoutAtEditStart to reflect the saved state
         setLayoutAtEditStart(JSON.parse(JSON.stringify(currentLayout)));
+
+        // After saving the working layout, also keep the default saved layout (if any) in sync
+        try {
+          const zoneLayoutsForZone = savedLayouts[currentZone.id] || [];
+          const defaultSaved = zoneLayoutsForZone.find(l => l.is_default);
+          if (defaultSaved) {
+            const { data, error } = await supabase
+              .from('saved_layouts')
+              .update({ 
+                layout: currentLayout,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', defaultSaved.id)
+              .eq('user_id', user.id)
+              .select()
+              .single();
+
+            if (!error && data) {
+              const updatedDefault = {
+                id: data.id,
+                name: data.name,
+                layout: data.layout || { tables: [], walls: [], texts: [] },
+                created_at: data.created_at,
+                zone_id: data.zone_id,
+                user_id: data.user_id,
+                is_default: data.is_default || false
+              };
+              const updatedList = zoneLayoutsForZone.map(l => 
+                l.id === updatedDefault.id ? updatedDefault : l
+              );
+              setSavedLayouts(prev => ({ ...prev, [currentZone.id]: updatedList }));
+            } else if (error) {
+              console.error('Failed to sync default saved layout with working layout:', error);
+            }
+          }
+        } catch (syncErr) {
+          console.error('Unexpected error while syncing default saved layout:', syncErr);
+        }
       } catch (error) {
         console.error('Failed to save layout:', error);
         throw error;
@@ -691,7 +784,7 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         saveInProgressRef.current = false;
       }
     }, 500); // 500ms debounce
-  }, [user, currentZone, undoRedoLayouts]);
+  }, [user, currentZone, undoRedoLayouts, savedLayouts]);
 
   // Custom setIsEditing that handles cleanup
   const setIsEditing = useCallback((editing: boolean) => {

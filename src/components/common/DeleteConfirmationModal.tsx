@@ -104,7 +104,7 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
       <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-md overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
@@ -163,7 +163,8 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
   );
 
   // Use Portal to ensure modal renders on top of everything
-  return createPortal(modalContent, document.body);
+  const portalTarget = document.getElementById('app-zoom-root') || document.body;
+  return createPortal(modalContent, portalTarget);
 };
 
 export default DeleteConfirmationModal; 

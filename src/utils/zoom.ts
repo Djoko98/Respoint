@@ -7,17 +7,18 @@
  * @returns The zoom factor (1.0 = 100%, 1.5 = 150%, etc.)
  */
 export function getZoom(): number {
-  const zoomStyle = document.body.style.zoom;
+  // Prefer app-level zoom set on #app-zoom-root (App.tsx)
+  const root = document.getElementById('app-zoom-root') as HTMLElement | null;
+  const zoomStyle = root?.style?.zoom || document.body.style.zoom || '';
   if (!zoomStyle || zoomStyle === '') {
     return 1.0;
   }
-  
-  // Handle percentage values (e.g., "150%")
+  // Handle percentage values (e.g., "85%")
   if (zoomStyle.endsWith('%')) {
-    return parseFloat(zoomStyle.replace('%', '')) / 100;
+    const pct = parseFloat(zoomStyle.replace('%', ''));
+    return isNaN(pct) ? 1.0 : (pct / 100);
   }
-  
-  // Handle decimal values (e.g., "1.5")
+  // Handle decimal values (e.g., "0.85")
   const zoom = parseFloat(zoomStyle);
   return isNaN(zoom) ? 1.0 : zoom;
 }

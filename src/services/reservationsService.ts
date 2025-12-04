@@ -17,6 +17,8 @@ interface ReservationDB {
   notes?: string;
   color?: string;
   status: 'waiting' | 'confirmed' | 'arrived' | 'not_arrived' | 'cancelled';
+  cleared?: boolean;
+  is_vip?: boolean;
   is_deleted?: boolean; // For soft delete
   created_at?: string;
   updated_at?: string;
@@ -27,6 +29,7 @@ const mapFromDB = (dbReservation: ReservationDB): Reservation => ({
   id: dbReservation.id,
   user_id: dbReservation.user_id,
   guestName: dbReservation.guest_name,
+  isVip: dbReservation.is_vip === true,
   date: dbReservation.date,
   time: dbReservation.time,
   numberOfGuests: dbReservation.number_of_guests,
@@ -39,6 +42,7 @@ const mapFromDB = (dbReservation: ReservationDB): Reservation => ({
   notes: dbReservation.notes,
   color: dbReservation.color,
   status: dbReservation.status,
+  cleared: dbReservation.cleared === true,
   isDeleted: dbReservation.is_deleted,
   createdAt: dbReservation.created_at
 });
@@ -99,6 +103,14 @@ const mapToDB = (reservation: Partial<Reservation>): Partial<ReservationDB> => {
   if (reservation.status !== undefined) {
     dbReservation.status = reservation.status;
     console.log("📊 Mapped status:", dbReservation.status);
+  }
+  if ((reservation as any).isVip !== undefined) {
+    (dbReservation as any).is_vip = (reservation as any).isVip === true;
+    console.log("⭐ Mapped is_vip:", (dbReservation as any).is_vip);
+  }
+  if ((reservation as any).cleared !== undefined) {
+    (dbReservation as any).cleared = (reservation as any).cleared as boolean;
+    console.log("🧹 Mapped cleared:", (dbReservation as any).cleared);
   }
   if (reservation.isDeleted !== undefined) {
     dbReservation.is_deleted = reservation.isDeleted;

@@ -101,12 +101,12 @@ const ReservationModal: React.FC<ReservationModalProps> = ({ isOpen, onClose, re
     <>
       {/* Backdrop */}
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200]" 
+        className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050]" 
         onClick={onClose}
       />
       
       {/* Modal panel */}
-      <div className="fixed right-0 top-0 h-full w-96 bg-[#000814] border-l border-gray-800 shadow-2xl z-[201] flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-96 bg-[#000814] border-l border-gray-800 shadow-2xl z-[12051] flex flex-col">
         {/* Header */}
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center justify-between mb-3">

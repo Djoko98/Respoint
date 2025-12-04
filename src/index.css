@@ -1,7 +1,93 @@
+/* Service type dropdown scrollbar */
+.service-type-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #4B5563 transparent;
+}
+
+.service-type-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.service-type-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.service-type-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B5563;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.service-type-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6B7280;
+}
+
+.service-type-scrollbar::-webkit-scrollbar-thumb:active {
+  background: #9CA3AF;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --titlebar-h: 28px; /* must match TitleBar height (h-7 => 1.75rem ~= 28px) */
+}
+
+/* Strong, feathered glow pulse for rings (SVG path/ellipse) */
+@keyframes rp-glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 var(--rp-glow-color, rgba(0,0,0,0)));
+  }
+  50% {
+    filter: drop-shadow(0 0 20px var(--rp-glow-color, rgba(0,0,0,0)));
+  }
+}
+.respoint-glow-pulse {
+  animation: rp-glow-pulse 1.2s ease-in-out infinite;
+  will-change: filter;
+}
+
+/* Softer pulse tuned for small boxes (countdown badge) */
+@keyframes rp-glow-pulse-soft {
+  0%, 100% {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  }
+  50% {
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.35),
+      0 0 14px var(--rp-glow-color, rgba(0,0,0,0));
+  }
+}
+.respoint-glow-pulse-soft {
+  animation: rp-glow-pulse-soft 1.2s ease-in-out infinite;
+  will-change: box-shadow;
+}
+
+/* Feathered ring pulse using box-shadow to avoid rectangular filter bounds */
+@keyframes rp-glow-pulse-ring {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(0,0,0,0);
+  }
+  50% {
+    box-shadow: 0 0 24px var(--rp-glow-color, rgba(0,0,0,0));
+  }
+}
+.respoint-glow-pulse-ring {
+  animation: rp-glow-pulse-ring 1.2s ease-in-out infinite;
+  will-change: box-shadow;
+}
+
+/* Stroke pulse for the ring stroke itself */
+@keyframes rp-stroke-pulse {
+  0%, 100% { opacity: 0.35; } /* lower when glow is minimal */
+  50% { opacity: 1; }         /* peak opacity when glow is strongest */
+}
+.respoint-stroke-pulse {
+  animation: rp-stroke-pulse 1.2s ease-in-out infinite;
+  will-change: opacity;
+}
 /* Reset and base styles */
 * {
   margin: 0;
@@ -14,10 +100,24 @@ html, body {
   overflow: hidden;
 }
 
+#root, body, * {
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection where it is necessary for editing/input */
+input, textarea, select, [contenteditable="true"], .canvas-text-editor, .allow-text-select {
+  -webkit-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+}
+
 #root {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 body {
@@ -79,6 +179,7 @@ html, body {
 [data-theme="light"] .titlebar-buttons .text-gray-400 { color: #475569 !important; }
 [data-theme="light"] .titlebar-buttons .bg-gray-800 { background-color: #e5e7eb !important; }
 [data-theme="light"] .titlebar-buttons .hover\:bg-gray-800:hover { background-color: #e2e8f0 !important; }
+[data-theme="light"] .titlebar-buttons .titlebar-close:hover svg { color: #ffffff !important; }
 
 [data-theme="light"] .text-\[\#8891A7\] { color: var(--text-muted) !important; }
 /* Scope text-white overrides to dark-surface containers only */
@@ -147,6 +248,12 @@ html, body {
 [data-theme="light"] .waiter-chip { background-color: rgba(229, 231, 235, 0.85) !important; color: #ffffff !important; }
 [data-theme="light"] .waiter-chip * { color: #ffffff !important; }
 
+/* Subscription: keep primary CTA text white in light mode */
+[data-theme="light"] .plan-select-btn,
+[data-theme="light"] .plan-select-btn * { color: #ffffff !important; }
+/* Subscription: force white text for "Najpopularniji" badge in light mode */
+[data-theme="light"] .popular-badge { color: #ffffff !important; }
+
 /* Light mode: keep canvas text white for better contrast on dark canvas */
 [data-theme="light"] .canvas-text { color: #ffffff !important; }
 
@@ -191,6 +298,53 @@ html, body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover,
 .account-settings-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #6B7280;
+}
+
+/* Unified select styling */
+.respoint-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding: 0.6rem 2.5rem 0.6rem 0.85rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background-color: #000814;
+  color: #F8FAFC;
+  font-size: 0.95rem;
+  line-height: 1.25rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23F8FAFC' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 12px;
+}
+
+.respoint-select:focus {
+  outline: none;
+  border-color: #60A5FA;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
+}
+
+.respoint-select option {
+  background-color: #000814;
+  color: #F8FAFC;
+}
+
+.respoint-select::-ms-expand {
+  display: none;
+}
+
+[data-theme="light"] .respoint-select {
+  background-color: #F8FAFC;
+  color: #0F172A;
+  border-color: rgba(15, 23, 42, 0.2);
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%230F172A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+[data-theme="light"] .respoint-select option {
+  background-color: #ffffff;
+  color: #0F172A;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:active,
@@ -302,6 +456,11 @@ html, body {
 
 .table-number-scrollbar::-webkit-scrollbar-thumb:active {
   background: #9CA3AF;
+}
+
+/* Reserve gutter for scrollbars to prevent layout shift when scrollbars appear */
+.stable-scrollbar {
+  scrollbar-gutter: stable both-edges;
 }
 
 /* Sidebar scrollbar with transparent background */
@@ -416,9 +575,83 @@ html, body {
   }
 }
 
+/* Slide right appearance animation */
+@keyframes slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-right {
+  animation: slide-right 0.16s ease-out both;
+}
+
 /* Custom transitions for buttons and links */
 .transition-button {
   @apply transition-all duration-200 ease-in-out;
+}
+
+/* Timeline scroll wrapper - provides both X and Y scrollbars just for the timeline grid */
+.timeline-scroll-wrapper {
+  width: 100%;
+  height: 100%; /* Fill available vertical space so the horizontal scrollbar sits at the bottom of the overlay area */
+  overflow-x: auto;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Inner grid to force horizontal overflow beyond wrapper */
+.timeline-grid {
+  min-width: 2000px;
+  /* Remove forced vertical space so scroll height matches actual rows */
+}
+
+/* Timeline specific scrollbar sizing */
+.timeline-scroll-wrapper::-webkit-scrollbar {
+  width: 6px;   /* match account settings */
+  height: 6px;  /* match account settings */
+}
+
+/* Timeline scrollbar buttons (Chromium/WebKit only) */
+.timeline-scroll-wrapper::-webkit-scrollbar-button {
+  display: block;
+  width: 6px;
+  height: 6px;
+  background-color: #1F2937; /* align with track */
+  border: 1px solid #1F2937;
+  border-radius: 2px;
+  background-repeat: no-repeat;
+  background-position: center;
+  cursor: pointer;
+}
+
+/* Vertical up (decrement) */
+.timeline-scroll-wrapper::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2399a7b3' stroke-width='2'%3E%3Cpolyline points='18 15 12 9 6 15'/%3E%3C/svg%3E");
+}
+/* Vertical down (increment) */
+.timeline-scroll-wrapper::-webkit-scrollbar-button:vertical:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2399a7b3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
+/* Horizontal left (decrement) */
+.timeline-scroll-wrapper::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2399a7b3' stroke-width='2'%3E%3Cpolyline points='15 6 9 12 15 18'/%3E%3C/svg%3E");
+}
+/* Horizontal right (increment) */
+.timeline-scroll-wrapper::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2399a7b3' stroke-width='2'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E");
+}
+
+/* Hover state for buttons */
+.timeline-scroll-wrapper::-webkit-scrollbar-button:hover {
+  background-color: #2A3B4F;
+  border-color: #2A3B4F;
 }
 
 /* Scrollbar styles */
@@ -446,6 +679,58 @@ html, body {
   background: #9CA3AF;
 }
 
+/* Unified scrollbar across app (transparent track, gray thumb) */
+.account-settings-scrollbar,
+.statistics-scrollbar,
+.table-number-scrollbar,
+.sidebar-scrollbar,
+.timeline-scroll-wrapper,
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #646464 transparent;
+}
+.account-settings-scrollbar::-webkit-scrollbar,
+.statistics-scrollbar::-webkit-scrollbar,
+.table-number-scrollbar::-webkit-scrollbar,
+.sidebar-scrollbar::-webkit-scrollbar,
+.timeline-scroll-wrapper::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.account-settings-scrollbar::-webkit-scrollbar-track,
+.statistics-scrollbar::-webkit-scrollbar-track,
+.table-number-scrollbar::-webkit-scrollbar-track,
+.sidebar-scrollbar::-webkit-scrollbar-track,
+.timeline-scroll-wrapper::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.account-settings-scrollbar::-webkit-scrollbar-thumb,
+.statistics-scrollbar::-webkit-scrollbar-thumb,
+.table-number-scrollbar::-webkit-scrollbar-thumb,
+.sidebar-scrollbar::-webkit-scrollbar-thumb,
+.timeline-scroll-wrapper::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 6px;
+}
+.account-settings-scrollbar::-webkit-scrollbar-thumb:hover,
+.statistics-scrollbar::-webkit-scrollbar-thumb:hover,
+.table-number-scrollbar::-webkit-scrollbar-thumb:hover,
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover,
+.timeline-scroll-wrapper::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+[data-theme="light"] .account-settings-scrollbar,
+[data-theme="light"] .statistics-scrollbar,
+[data-theme="light"] .table-number-scrollbar,
+[data-theme="light"] .sidebar-scrollbar,
+[data-theme="light"] .timeline-scroll-wrapper,
+[data-theme="light"] .custom-scrollbar {
+  scrollbar-color: #9ca3af transparent;
+}
 /* Rotation cursor */
 .cursor-rotate {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>') 12 12, grab;

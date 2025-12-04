@@ -1,4 +1,5 @@
-import React, { useState, useContext, useEffect, useCallback } from "react";
+import React, { useState, useContext, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { ZoneContext } from "../../context/ZoneContext";
 import { useLanguage } from "../../context/LanguageContext";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
@@ -26,6 +27,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Zone } from "../../context/ZoneContext";
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { ThemeContext } from "../../context/ThemeContext";
 
 interface ZoneModalProps {
   isOpen: boolean;
@@ -71,6 +73,9 @@ const SortableZoneItem: React.FC<SortableZoneItemProps> = ({
     disabled: isEditing, // Disable dragging while editing
   });
 
+  const { theme } = useContext(ThemeContext);
+  const isLightTheme = theme === 'light';
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -96,6 +101,7 @@ const SortableZoneItem: React.FC<SortableZoneItemProps> = ({
             : 'cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-400'
         }`}
         title={isEditing ? "Cannot drag while editing" : t('dragToReorder')}
+        style={{ touchAction: 'none' }}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="9" cy="12" r="1" />
@@ -150,11 +156,11 @@ const SortableZoneItem: React.FC<SortableZoneItemProps> = ({
           </button>
           <button
             onClick={() => onDeleteZone(zone.id)}
-            className="text-gray-500 hover:text-red-400 transition-colors p-1"
+            className={`group text-gray-500 transition-colors p-1 ${isLightTheme ? 'hover:text-red-500' : 'hover:text-red-400'}`}
             disabled={totalZones <= 1}
             title={totalZones <= 1 ? t('cannotDeleteLastZone') : t('deleteZoneTooltip')}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg className={`${isLightTheme ? 'group-hover:text-red-500' : 'group-hover:text-red-400'} transition-colors pointer-events-none`} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6" />
             </svg>
           </button>
@@ -186,6 +192,72 @@ const ZoneModal: React.FC<ZoneModalProps> = ({ isOpen, onClose }) => {
     message: '',
     type: 'error' as 'info' | 'error' | 'success'
   });
+
+  // Edge auto-scroll while dragging within the zones list
+  const pointerYRef = useRef<number>(0);
+  const scrollIntervalRef = useRef<number | null>(null);
+  const SCROLL_EDGE_THRESHOLD = 56; // px
+  const SCROLL_MAX_STEP = 22; // px per tick
+
+  const stopEdgeAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current != null) {
+      window.clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
+  }, []);
+
+  const handlePointerMove = useCallback((e: PointerEvent) => {
+    pointerYRef.current = e.clientY;
+    const container = document.getElementById('zones-container');
+    if (!container) {
+      stopEdgeAutoScroll();
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    const offsetTop = pointerYRef.current - rect.top;
+    const offsetBottom = rect.bottom - pointerYRef.current;
+    const nearTop = offsetTop < SCROLL_EDGE_THRESHOLD;
+    const nearBottom = offsetBottom < SCROLL_EDGE_THRESHOLD;
+
+    if (!nearTop && !nearBottom) {
+      // Not near edges → ensure no interval is running
+      stopEdgeAutoScroll();
+      return;
+    }
+
+    // Start or continue interval loop
+    if (scrollIntervalRef.current == null) {
+      scrollIntervalRef.current = window.setInterval(() => {
+        const el = document.getElementById('zones-container');
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const y = pointerYRef.current;
+        const distTop = y - r.top;
+        const distBottom = r.bottom - y;
+        const isNearTop = distTop < SCROLL_EDGE_THRESHOLD;
+        const isNearBottom = distBottom < SCROLL_EDGE_THRESHOLD;
+
+        if (!(isNearTop || isNearBottom)) {
+          // Pointer moved away from edges
+          stopEdgeAutoScroll();
+          return;
+        }
+
+        // Speed scales with how close we are to the edge
+        const proximity = Math.max(
+          0,
+          SCROLL_EDGE_THRESHOLD - Math.min(distTop, distBottom)
+        );
+        const step = Math.max(1, Math.min(SCROLL_MAX_STEP, (proximity / SCROLL_EDGE_THRESHOLD) * SCROLL_MAX_STEP));
+
+        if (isNearTop) {
+          el.scrollBy({ top: -step, behavior: 'auto' });
+        } else if (isNearBottom) {
+          el.scrollBy({ top: step, behavior: 'auto' });
+        }
+      }, 16); // ~60fps
+    }
+  }, [stopEdgeAutoScroll]);
 
   // Helper function to show alert modal
   const showAlert = useCallback((title: string, message: string, type: 'info' | 'error' | 'success' = 'error') => {
@@ -272,11 +344,18 @@ const ZoneModal: React.FC<ZoneModalProps> = ({ isOpen, onClose }) => {
     const { active } = event;
     const zone = localZones.find(z => z.id === active.id);
     setActiveZone(zone || null);
+    try {
+      window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    } catch {}
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveZone(null);
+    try {
+      window.removeEventListener('pointermove', handlePointerMove as any);
+    } catch {}
+    stopEdgeAutoScroll();
 
     if (active.id !== over?.id) {
       const oldIndex = localZones.findIndex((zone) => zone.id === active.id);
@@ -316,10 +395,14 @@ const ZoneModal: React.FC<ZoneModalProps> = ({ isOpen, onClose }) => {
 
   const handleDragCancel = () => {
     setActiveZone(null);
+    try {
+      window.removeEventListener('pointermove', handlePointerMove as any);
+    } catch {}
+    stopEdgeAutoScroll();
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[200] flex items-center justify-center">
+  const modalNode = (
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12040] flex items-center justify-center">
       <div className="w-full max-w-md mx-auto flex flex-col p-4">
         <div className="bg-[#000814] rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
           {/* Header */}
@@ -375,7 +458,7 @@ const ZoneModal: React.FC<ZoneModalProps> = ({ isOpen, onClose }) => {
               
               {/* Zones container */}
               <div 
-                className="space-y-2 max-h-64 overflow-y-auto pr-1 statistics-scrollbar"
+                className="space-y-2 max-h-64 overflow-y-auto pr-1 pl-1 statistics-scrollbar"
                 id="zones-container"
               >
                 <DndContext
@@ -442,6 +525,7 @@ const ZoneModal: React.FC<ZoneModalProps> = ({ isOpen, onClose }) => {
       />
     </div>
   );
+  return createPortal(modalNode, document.body);
 };
 
 export default ZoneModal; 

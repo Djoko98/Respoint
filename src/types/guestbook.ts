@@ -9,6 +9,21 @@ export interface GuestbookEntry {
   preferredSeating?: string; // favorite zone/table preferences
   favoriteDrinks?: string; // free text or comma-separated
   favoriteFoods?: string; // free text or comma-separated
+  allergens?: string; // known allergens for the guest, free text
+
+  // Social links
+  instagram?: string;
+  facebook?: string;
+  tiktok?: string;
+  twitter?: string;
+  website?: string;
+
+  // Extra profile fields
+  birthDate?: string; // ISO date (YYYY-MM-DD)
+  location?: string; // e.g., "Belgrade, Serbia"
+  favoriteWine?: string;
+  foodRequests?: string;
+  drinkRequests?: string;
   averageBill?: number; // average bill amount
   notes?: string; // additional wishes/preferences
   lastVisitAt?: string; // ISO string

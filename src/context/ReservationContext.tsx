@@ -6,6 +6,8 @@ import { reservationsService } from "../services/reservationsService";
 import { notificationService } from "../services/notificationService";
 import { getCurrentWindow, UserAttentionType } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { reservationAdjustmentsService } from "../services/reservationAdjustmentsService";
+import { guestbookService } from "../services/guestbookService";
 
 interface ReservationContextType {
   reservations: Reservation[];
@@ -196,7 +198,8 @@ export const ReservationProvider: React.FC<{ children: ReactNode }> = React.memo
         email: reservation.email,
         notes: reservation.notes,
         color: reservation.color,
-        status: reservation.status || 'waiting'
+        status: reservation.status || 'waiting',
+        is_vip: (reservation as any)?.isVip === true
       };
       
       console.log('📤 Direct Supabase insert data:', directInsertData);
@@ -220,6 +223,7 @@ export const ReservationProvider: React.FC<{ children: ReactNode }> = React.memo
           id: data.id,
           user_id: data.user_id,
           guestName: data.guest_name,
+          isVip: data?.is_vip === true,
           date: data.date,
           time: data.time,
           numberOfGuests: data.number_of_guests,
@@ -239,6 +243,21 @@ export const ReservationProvider: React.FC<{ children: ReactNode }> = React.memo
           console.log('📊 ReservationContext: Updated local state - previous count:', prev.length, 'new count:', updated.length);
           return updated;
         });
+
+        // Link this reservation to a selected guestbook entry if present
+        try {
+          const gbId = localStorage.getItem('respoint_selected_guestbook_id');
+          if (gbId) {
+            let map: Record<string, string> = {};
+            try {
+              const raw = localStorage.getItem('respoint_res_to_guestbook');
+              map = raw ? JSON.parse(raw) : {};
+            } catch { map = {}; }
+            map[data.id] = gbId;
+            localStorage.setItem('respoint_res_to_guestbook', JSON.stringify(map));
+            localStorage.removeItem('respoint_selected_guestbook_id');
+          }
+        } catch {}
         
         console.log('✅ Direct insert successful, skipping service call');
         return;
@@ -260,21 +279,164 @@ export const ReservationProvider: React.FC<{ children: ReactNode }> = React.memo
     
     console.log('✏️ Updating reservation:', id);
     console.log('📝 Update data:', updates);
+    const previous = reservations.find(r => r.id === id);
     
     try {
       const updated = await reservationsService.updateReservation(id, updates);
       console.log('✅ Reservation updated successfully:', updated);
       
       setReservations(prev => {
-        const updatedList = prev.map(r => r.id === id ? updated : r);
+        const updatedList = prev.map(r => {
+          if (r.id !== id) return r;
+          // Preserve local-only flags like isVip if not provided in updates/service result
+          const next: Reservation = { ...updated, isVip: (updates as any)?.isVip ?? r.isVip };
+          return next;
+        });
         console.log('📊 Updated reservations list:', updatedList);
         return updatedList;
       });
+
+      // If status just became arrived, update guestbook lastVisit/totalVisits
+      try {
+        if (updated?.status === 'arrived' && previous?.status !== 'arrived') {
+          const normalizeText = (s: string) =>
+            (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const normalizePhone = (p?: string) => (p || '').replace(/\D+/g, '');
+          const guestName = normalizeText(updated.guestName || '');
+          const phoneDigits = normalizePhone(updated.phone);
+          let list = await guestbookService.list();
+          let matched = undefined as any;
+          // 1) Check explicit mapping reservation -> guestbookId
+          try {
+            const rawMap = localStorage.getItem('respoint_res_to_guestbook');
+            if (rawMap) {
+              const map: Record<string, string> = JSON.parse(rawMap);
+              const gbId = map[updated.id];
+              if (gbId) {
+                matched = list.find(e => e.id === gbId) || matched;
+              }
+            }
+          } catch {}
+          // 2) Prefer phone match if sufficiently specific
+          if (!matched && phoneDigits && phoneDigits.length >= 5) {
+            matched = list.find(e => normalizePhone(e.phone) === phoneDigits);
+          }
+          // 3) Fallback to exact normalized name
+          if (!matched && guestName) {
+            matched = list.find(e => normalizeText(e.name || '') === guestName);
+          }
+          if (matched && matched.id) {
+            const dateOnly = (updated.date || '').slice(0, 10);
+            const lastVisitDate = (matched.lastVisitAt || '').slice(0, 10);
+            const alreadyCounted = dateOnly && lastVisitDate === dateOnly;
+            const newTotal = (matched.totalVisits || 0) + (alreadyCounted ? 0 : 1);
+            // Compute average weekly visit frequency using all ARRIVED reservations for this guest
+            const normalizePhone2 = (p?: string) => (p || '').replace(/\D+/g, '');
+            const normalizeText2 = (s: string) =>
+              (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            // Build reservation list including current update
+            const allAfterUpdate = reservations.map(r => (r.id === id ? { ...r, ...updated } : r));
+            let map: Record<string, string> = {};
+            try {
+              const raw = localStorage.getItem('respoint_res_to_guestbook');
+              map = raw ? JSON.parse(raw) : {};
+            } catch { map = {}; }
+            const sameGuestReservations = allAfterUpdate.filter((r) => {
+              if (!r) return false;
+              if (map[r.id] === matched.id) return true;
+              const phoneEq =
+                normalizePhone2(r.phone) &&
+                normalizePhone2(matched.phone) &&
+                normalizePhone2(r.phone) === normalizePhone2(matched.phone) &&
+                normalizePhone2(matched.phone).length >= 5;
+              if (phoneEq) return true;
+              const nameEq =
+                normalizeText2(r.guestName || '') === normalizeText2(matched.name || '');
+              return nameEq;
+            });
+            const arrived = sameGuestReservations.filter((r) => (r as any)?.status === 'arrived');
+            let visitFrequencyStr: string | undefined = undefined;
+            if (arrived.length > 0) {
+              const times = arrived
+                .map((r) => new Date((r.date || '').slice(0, 10)).getTime())
+                .filter((t) => !Number.isNaN(t))
+                .sort((a, b) => a - b);
+              const first = times[0];
+              const last = times[times.length - 1];
+              const diffDays = Math.max(0, Math.round((last - first) / (1000 * 60 * 60 * 24)));
+              const weeks = Math.max(1, diffDays / 7 || 1);
+              const perWeek = arrived.length / weeks;
+              visitFrequencyStr = `${Number(perWeek.toFixed(1))} / week`;
+              // Average seats per reservation from arrived
+              const avgSeats =
+                arrived.reduce((acc, r) => acc + (Number((r as any).numberOfGuests) || 0), 0) /
+                Math.max(1, arrived.length);
+              // Persist lightweight stats locally so they remain visible after clearing/deleting reservations
+              try {
+                const rawStats = localStorage.getItem('respoint_guest_stats');
+                const statsMap: Record<string, { weekly: number; avgSeats: number }> = rawStats ? JSON.parse(rawStats) : {};
+                statsMap[matched.id] = { weekly: Number(perWeek.toFixed(1)), avgSeats: Number(avgSeats.toFixed(1)) };
+                localStorage.setItem('respoint_guest_stats', JSON.stringify(statsMap));
+              } catch {}
+            }
+            await guestbookService.update(matched.id, { totalVisits: newTotal, lastVisitAt: dateOnly, ...(visitFrequencyStr ? { visitFrequency: visitFrequencyStr } : {}) });
+          }
+        }
+      } catch (guestErr) {
+        console.warn('⚠️ Failed to update guestbook on arrived status (non-fatal):', guestErr);
+      }
+
+      // Keep Timeline Overlay in sync with edited reservation time/date
+      try {
+        if (updated?.time) {
+          const [hh, mm] = updated.time.split(':').map(Number);
+          const newStartMin = (hh % 24) * 60 + (mm % 60);
+          const dateKey = updated.date;
+
+          // Load existing local adjustments for the target date
+          let localMap: any = {};
+          try {
+            const raw = localStorage.getItem(`respoint-duration-adjustments:${dateKey}`);
+            localMap = raw ? JSON.parse(raw) : {};
+          } catch {
+            localMap = {};
+          }
+          const existing = localMap?.[id] || {};
+
+          // Shift end to preserve duration if it exists, otherwise leave undefined
+          let nextStart = newStartMin;
+          let nextEnd: number | undefined = undefined;
+          if (typeof existing.start === 'number' && typeof existing.end === 'number') {
+            const duration = Math.max(15, existing.end - existing.start);
+            nextEnd = Math.max(nextStart + 15, Math.min(1440, nextStart + duration));
+          } else if (typeof existing.end === 'number' && existing.start === undefined) {
+            // If only end existed, attempt to preserve absolute end by shifting relative to newStart
+            const duration = Math.max(15, existing.end - newStartMin);
+            nextEnd = Math.max(nextStart + 15, Math.min(1440, newStartMin + duration));
+          }
+
+          // Persist locally
+          try {
+            localMap[id] = { start: nextStart, ...(nextEnd !== undefined ? { end: nextEnd } : {}) };
+            localStorage.setItem(`respoint-duration-adjustments:${dateKey}`, JSON.stringify(localMap));
+          } catch {}
+
+          // Persist to DB
+          try {
+            await reservationAdjustmentsService.upsertAdjustment(dateKey, id, { start: nextStart, end: nextEnd });
+          } catch {}
+
+          // Notify listeners (TimelineOverlay / Seated timers)
+          try { window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date: dateKey } })); } catch {}
+        }
+      } catch (syncErr) {
+        console.warn('⚠️ Failed to sync overlay adjustments after time change', syncErr);
+      }
     } catch (error) {
       console.error('❌ Failed to update reservation:', error);
       throw error;
     }
-  }, [user?.id]);
+  }, [user?.id, reservations]);
 
   // Delete reservation function with detailed logging
   const deleteReservation = useCallback(async (id: string) => {

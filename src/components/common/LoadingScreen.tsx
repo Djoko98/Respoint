@@ -367,7 +367,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   return (
     <AnimatePresence>
       <motion.div 
-        className="fixed inset-0 bg-[#000814] flex items-center justify-center loading-screen"
+        className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-[#000814] flex items-center justify-center loading-screen"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}

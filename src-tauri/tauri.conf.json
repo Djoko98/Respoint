@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ResPoint",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "identifier": "com.respoint.app",
   "build": {
     "frontendDist": "../dist",
@@ -45,9 +45,9 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFMUI5NTJERTk4NkE1Q0UKUldUT3BZYnBMWlViWGg1WWJSbW5iU1FxN29hd0FZZ0phK1BQTng5cW5IOWhSV09wbkpWM3pzUTUK",
+      "pubkey": "RWTOpYbpLZUbXh5YbRmnbSQq7oawAYgJa+PPNx9qnH9hRWOpnJV3zsQ5",
       "endpoints": [
-        "https://github.com/Djoko98/Respoint/releases/latest/download/latest.json"
+        "https://github.com/Djoko98/Respoint/releases/download/v0.1.11/latest.json"
       ],
       "dialog": true,
       "windows": {
