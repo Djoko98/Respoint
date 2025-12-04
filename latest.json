@@ -1,9 +1,10 @@
 {
-  "version": "0.1.22",
+  "version": "0.1.23",
   "notes": "Auto release",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.22/ResPoint_0.1.22_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkNClJVU1V0NlkvMWFlZ3hpMFFrbnVQdVJ3SjVleExjQjFvTk5QZGZBOUxiTjVIK2l1MnRXdm0rMzQyVklKN0pic3dWcVo3bzNXcVBlbXF6eENRbDNmTWpHeGtjTjBLa2lRd1dRMD0NCnRydXN0ZWQgY29tbWVudDogdGltZXN0YW1wOjE3NjQ4Nzc4NjAJZmlsZTpSZXNQb2ludF8wLjEuMjNfeDY0LXNldHVwLmV4ZQloYXNoZWQNCkl0RllKQ1pzdWNPN29FK1d4eTNXRnhHVlJXVHdNYlh4WWQ5UVRxN1NwWFV3UEY1UFpvcTBrWkxaSzA5ejNGYzh2aWJ0NER1TkZzekJzeGx3eHNjR0JRPT0NCg==",
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.23/ResPoint_0.1.23_x64-setup.exe"
     }
   }
 }
