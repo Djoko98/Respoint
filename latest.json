@@ -1,11 +1,11 @@
 {
-  "version": "0.1.38",
+  "version": "0.1.39",
   "notes": "Automatic Release",
-  "pub_date": "2025-12-08T07:20:53.723Z",
+  "pub_date": "2025-12-08T11:44:01.081Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "RUSUt6Y/1aegxrE+97exJj/f7XEz0N8MNImLmAz/x5KjP2rBVmgSR5ikKINTXPxqqfcO28wsn7nwSgB6TShRtNjv5ehlQWqEGwk=",
-      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.38/ResPoint_0.1.38_x64-setup.exe"
+      "signature": "RUSUt6Y/1aegxlBoUsDA+7AlPy4V1ndEKimBZmjj31hO9Kp3RLacVIOFQpiB0dmjJEqypFawmdPbizyEC3Lf1LleJtADveVIiAs=",
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.39/ResPoint_0.1.39_x64-setup.exe"
     }
   }
 }
