@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ResPoint",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "identifier": "com.respoint.app",
   "build": {
     "frontendDist": "../dist",
@@ -22,7 +22,8 @@
         "maximized": true,
         "decorations": false,
         "transparent": false,
-        "center": true
+        "center": true,
+        "devtools": true
       }
     ],
     "security": {
