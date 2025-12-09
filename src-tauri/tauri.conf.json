@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ResPoint",
-  "version": "0.1.59",
+  "version": "0.1.60",
   "identifier": "com.respoint.app",
   "build": {
     "frontendDist": "../dist",
@@ -50,7 +50,7 @@
         "https://raw.githubusercontent.com/Djoko98/Respoint/main/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }
