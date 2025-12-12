@@ -1,7 +1,9 @@
-﻿node_modules/
+node_modules/
 dist/
 src-tauri/target/
 src-tauri/target/**
 src-tauri/gen/
 .vscode/
 .DS_Store
+.tauri/
+*.key

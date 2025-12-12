@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useContext } from 'react';
-import Modal from '../common/Modal';
+import { createPortal } from 'react-dom';
 import { GuestbookEntry } from '../../types/guestbook';
 import { guestbookService } from '../../services/guestbookService';
 import { uploadGuestAvatar } from '../../services/storageService';
@@ -400,7 +400,13 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
       list.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
     } else if (sortMode === 'phone') {
       const norm = (p?: string) => (p || '').replace(/\D+/g, '');
-      list.sort((a, b) => norm(a.phone).localeCompare(norm(b.phone)));
+      list.sort((a, b) => {
+        const aHas = !!norm(a.phone);
+        const bHas = !!norm(b.phone);
+        // Prvo gosti sa popunjenim brojem, zatim bez broja
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return norm(a.phone).localeCompare(norm(b.phone));
+      });
     } else if (sortMode === 'loyalty') {
       list.sort((a, b) => {
         const ai = a.isVip ? 1 : 0;
@@ -767,7 +773,7 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
     return () => window.removeEventListener('mousedown', handler);
   }, [locationDropdownOpen]);
 
-  const panelContainerClass = isLight ? 'flex h-[85vh] w-full min-w-0 bg-white text-[#0f172a]' : 'flex h-[85vh] w-full min-w-0 bg-[#000814] text-white';
+  const panelContainerClass = isLight ? 'flex h-full w-full min-w-0 bg-white text-[#0f172a]' : 'flex h-full w-full min-w-0 bg-[#000814] text-white';
   const leftPanelClass = isLight ? 'w-72 flex-shrink-0 border-r border-gray-200 p-3 mr-4 flex flex-col bg-white' : 'w-72 flex-shrink-0 border-r border-[#1E2A34] p-3 mr-4 flex flex-col bg-[#000814]';
   const headerTextClass = isLight ? 'text-gray-700 text-sm' : 'text-gray-300 text-sm';
   const addBtnClass = isLight ? 'px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50' : 'px-2 py-1 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10 disabled:opacity-50';
@@ -781,8 +787,8 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
   const statsTitleClass = isLight ? 'text-gray-500 text-sm mb-2' : 'text-gray-400 text-sm mb-2';
   const statsGridText = isLight ? 'text-sm text-gray-700' : 'text-sm text-gray-300';
   const rightSideTabClass = isLight
-    ? 'w-72 flex-shrink-0 p-3 border border-gray-200 bg-white overflow-y-auto statistics-scrollbar stable-scrollbar'
-    : 'w-72 flex-shrink-0 p-3 border border-gray-800 bg-[#0A1929] overflow-y-auto statistics-scrollbar stable-scrollbar';
+    ? 'w-72 flex-shrink-0 p-3 border-l border-r border-gray-200 bg-white overflow-y-auto statistics-scrollbar stable-scrollbar'
+    : 'w-72 flex-shrink-0 p-3 border-l border-r border-gray-800 bg-[#0A1929] overflow-y-auto statistics-scrollbar stable-scrollbar';
   const sideActionBtnFullClass = isLight
     ? 'w-full px-3 py-2 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100'
     : 'w-full px-3 py-2 text-xs rounded border border-gray-700 text-gray-200 hover:bg-white/10';
@@ -858,10 +864,33 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
     }
     return { weeklyVisitsAvg: weekly, averageSeatsPerReservation: avgSeats };
   }, [reservations, selected]);
+  
+  if (!isOpen) return null;
 
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title={currentLanguage === 'srb' ? 'Knjiga gostiju' : 'Guestbook'} size="3xl" contentScrollable={false}>
-      <div className={panelContainerClass}>
+  const portalTarget = document.getElementById('app-zoom-root') || document.body;
+
+  return createPortal(
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[13000] flex items-stretch justify-center p-0">
+      <div className="bg-[#000814] w-full h-full max-w-none max-h-none rounded-none flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4">
+          <h2 className="text-xl font-light text-white tracking-wide">
+            {currentLanguage === 'srb' ? 'Knjiga gostiju' : 'Guestbook'}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-white transition-colors p-1"
+            aria-label="Close guestbook"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-hidden pb-6">
+          <div className={panelContainerClass}>
         {/* Left list */}
         <div className={leftPanelClass}>
           <div className="flex items-center justify-between mb-2">
@@ -1415,12 +1444,19 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
                 <div className="col-span-2 flex flex-col">
                   <span className="text-gray-500 text-xs mb-1">{currentLanguage === 'srb' ? 'Beleške / želje' : 'Notes / wishes'}</span>
                   {isEdit ? (
-                    <textarea rows={4}
-                              className={inputClass}
-                              value={form.notes}
-                              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                    <textarea
+                      rows={4}
+                      className={inputClass}
+                      value={form.notes}
+                      onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    />
                   ) : (
-                    <div className={readonlyTextClass}>{form.notes || '-'}</div>
+                    <div
+                      className={readonlyTextClass}
+                      style={{ whiteSpace: 'pre-wrap' }}
+                    >
+                      {form.notes || '-'}
+                    </div>
                   )}
                 </div>
                 {/* Average bill */}
@@ -1962,6 +1998,8 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
             </div>
           </aside>
         )}
+          </div>
+        </div>
       </div>
       {confirmModal && (
         <DeleteConfirmationModal
@@ -1993,7 +2031,8 @@ const GuestbookModal: React.FC<GuestbookModalProps> = ({ isOpen, onClose }) => {
           type="danger"
         />
       )}
-    </Modal>
+    </div>,
+    portalTarget
   );
 };
 

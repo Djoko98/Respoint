@@ -1,3 +1,5 @@
+use tauri::Emitter;
+
 #[cfg(windows)]
 use winapi::um::winspool::{OpenPrinterA, StartDocPrinterA, StartPagePrinter, WritePrinter, EndPagePrinter, EndDocPrinter, ClosePrinter, GetDefaultPrinterA, EnumPrintersA};
 
@@ -361,6 +363,13 @@ use std::mem::transmute;
 #[cfg(windows)]
 use std::ptr::null_mut;
 
+// Stub Viber message sender - for now this just logs to stdout.
+#[tauri::command]
+async fn send_viber_message(phone: String, message: String, reservation_code: String) -> Result<(), String> {
+    println!("📨 Viber stub -> phone: {}, code: {}, message:\n{}", phone, reservation_code, message);
+    Ok(())
+}
+
 #[tauri::command]
 fn set_taskbar_overlay(count: i32, window: tauri::Window) -> Result<(), String> {
     #[cfg(windows)]
@@ -496,7 +505,9 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_updater::Builder::new().build())
-    .invoke_handler(tauri::generate_handler![get_default_printer, list_printers, print_to_pos, set_taskbar_overlay])
+    .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_deep_link::init())
+    .invoke_handler(tauri::generate_handler![get_default_printer, list_printers, print_to_pos, set_taskbar_overlay, send_viber_message])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -505,6 +516,22 @@ pub fn run() {
             .build(),
         )?;
       }
+      
+      // Handle deep links - emit event to frontend when app receives a deep link URL
+      #[cfg(any(windows, target_os = "linux"))]
+      {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let handle = app.handle().clone();
+        app.deep_link().on_open_url(move |event| {
+          let urls = event.urls();
+          println!("🔗 Deep link received: {:?}", urls);
+          // Convert URLs to strings for frontend
+          let url_strings: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+          // Emit to frontend
+          let _ = handle.emit("deep-link://new-url", url_strings);
+        });
+      }
+      
       Ok(())
     })
     .run(tauri::generate_context!())

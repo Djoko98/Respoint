@@ -186,10 +186,10 @@ const Subscribe: React.FC<SubscribeProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
-      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-stretch justify-center p-0">
+      <div className="bg-[#000814] w-full h-full max-w-none max-h-none rounded-none flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+        <div className="flex items-center justify-between px-6 py-4">
           <h2 className="text-xl font-light text-white tracking-wide">{t('subscription')}</h2>
           <button
             onClick={onClose}

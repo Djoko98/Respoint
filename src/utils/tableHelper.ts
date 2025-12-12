@@ -37,6 +37,26 @@ export interface Table {
     circleStartDeg?: number;
     circleVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
     circleVariants?: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'>;
+    // Global chair sizing & spacing (applied unless overridden per seat/corner)
+    chairWidthPx?: number;
+    chairHeightPx?: number;
+    chairSpacingPx?: number;
+    // Optional per-seat size overrides by side (index-aligned with seat order)
+    topSeatSizes?: Array<{ w?: number; h?: number }>;
+    rightSeatSizes?: Array<{ w?: number; h?: number }>;
+    bottomSeatSizes?: Array<{ w?: number; h?: number }>;
+    leftSeatSizes?: Array<{ w?: number; h?: number }>;
+    // Optional explicit corner sizes
+    cornerTLWidthPx?: number;
+    cornerTLHeightPx?: number;
+    cornerTRWidthPx?: number;
+    cornerTRHeightPx?: number;
+    cornerBRWidthPx?: number;
+    cornerBRHeightPx?: number;
+    cornerBLWidthPx?: number;
+    cornerBLHeightPx?: number;
+    // Optional per-seat size overrides for circular tables
+    circleSeatSizes?: Array<{ w?: number; h?: number }>;
   };
 }
 
@@ -50,7 +70,7 @@ export interface ZoneLayouts {
 
 /**
  * Formats table names for display, handling deleted tables gracefully
- * @param tableIds - Array of table IDs
+ * @param tableIds - Array of table IDs or table numbers (as strings)
  * @param zoneLayouts - Zone layouts containing table data
  * @returns Formatted string of table names or appropriate message for deleted tables
  */
@@ -64,27 +84,35 @@ export const formatTableNames = (tableIds: string[] | undefined | null, zoneLayo
   const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []);
   
   // Map table IDs to names, filtering out deleted tables
+  // Try matching by ID first, then by table number (event reservations store numbers as strings)
   const validTableNames = tableIds
     .map(id => {
-      const table = allTables.find(t => t.id === id);
+      // First try to find by exact ID match
+      let table = allTables.find(t => t.id === id);
+      
+      // If not found, try matching by table number (event reservations store numbers as strings)
+      if (!table) {
+        const numericId = parseInt(id, 10);
+        if (!isNaN(numericId)) {
+          table = allTables.find(t => t.number === numericId);
+        }
+        // Also try string match on number
+        if (!table) {
+          table = allTables.find(t => String(t.number) === id);
+        }
+      }
+      
       return table ? (table.name || table.number?.toString() || `Table ${table.number}`) : null;
     })
     .filter(name => name !== null) as string[];
 
-  // Handle the case where some or all tables are deleted
-  const deletedTablesCount = tableIds.length - validTableNames.length;
-  
+  // Ako su svi stolovi izbrisani, ne prikazujemo nikakvu poruku – ostavi prazno
   if (validTableNames.length === 0) {
-    // All tables are deleted
-    return deletedTablesCount === 1 ? 'Table deleted' : 'Tables deleted';
-  } else if (deletedTablesCount > 0) {
-    // Some tables are deleted
-    const deletedText = deletedTablesCount === 1 ? '1 deleted table' : `${deletedTablesCount} deleted tables`;
-    return `${validTableNames.join(', ')} + ${deletedText}`;
-  } else {
-    // All tables exist
-    return validTableNames.join(', ');
+    return '';
   }
+
+  // Ako su neki stolovi izbrisani, prikazujemo samo postojeće (bez "+ deleted table" teksta)
+  return validTableNames.join(', ');
 };
 
 /**
@@ -100,7 +128,8 @@ export const getTableDisplayName = (tableId: string, zoneLayouts: ZoneLayouts | 
   if (table) {
     return table.name || table.number?.toString() || `Table ${table.number}`;
   } else {
-    return 'Deleted table';
+    // Za izbrisane stolove ne prikazujemo posebnu poruku
+    return '';
   }
 };
 

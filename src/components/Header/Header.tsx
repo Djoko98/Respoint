@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useContext } from "react";
 import { ZoneContext } from "../../context/ZoneContext";
 import { UserContext } from "../../context/UserContext";
 import { ReservationContext } from "../../context/ReservationContext";
+import { EventContext } from "../../context/EventContext";
 import { useLanguage } from "../../context/LanguageContext";
 import UserMenuTrigger from "../UserMenu/UserMenuTrigger";
 import RoleUnlockModal from "../Auth/RoleUnlockModal";
@@ -20,6 +21,7 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const { zones, currentZone, setCurrentZone } = useContext(ZoneContext);
   const { isAuthenticated, user } = useContext(UserContext);
   const { reservations } = useContext(ReservationContext);
+  const { allEventDates } = useContext(EventContext);
   const { t, getMonthNames, getDayNames, currentLanguage } = useLanguage();
   const { theme, toggleTheme } = useContext(ThemeContext);
   const [centerDate, setCenterDate] = useState(selectedDate);
@@ -38,6 +40,14 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
   const [showRolesInfo, setShowRolesInfo] = useState(false);
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
   const [calendarViewDate, setCalendarViewDate] = useState<Date>(selectedDate);
+  
+  // Force re-render when duration adjustments change (for spillover detection)
+  const [adjustmentsTick, setAdjustmentsTick] = useState(0);
+  useEffect(() => {
+    const handler = () => setAdjustmentsTick(t => t + 1);
+    window.addEventListener('respoint-duration-adjustments-changed', handler);
+    return () => window.removeEventListener('respoint-duration-adjustments-changed', handler);
+  }, []);
 
   // Update logoKey when user logo or theme changes to force refresh
   useEffect(() => {
@@ -82,12 +92,68 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
     const day = date.getDate().toString().padStart(2, '0');
     const dateString = `${year}-${month}-${day}`;
     
-    // Only mark dates with OPEN reservations (waiting or confirmed)
-    // Exclude closed reservations (arrived, not_arrived, cancelled)
-    return reservations.some(res => 
+    // Mark dates with active reservations: waiting, confirmed, OR arrived (seated) that are not cleared
+    const hasActiveOnDay = reservations.some(res => 
       res.date === dateString && 
-      (res.status === 'waiting' || res.status === 'confirmed')
+      (res.status === 'waiting' || res.status === 'confirmed' || 
+       (res.status === 'arrived' && !(res as any).cleared))
     );
+    if (hasActiveOnDay) return true;
+
+    // Also mark the date if there is a spillover from the previous day (reservation crosses midnight)
+    try {
+      const prev = new Date(date);
+      prev.setDate(prev.getDate() - 1);
+      const py = prev.getFullYear();
+      const pm = (prev.getMonth() + 1).toString().padStart(2, '0');
+      const pd = prev.getDate().toString().padStart(2, '0');
+      const prevKey = `${py}-${pm}-${pd}`;
+
+      const estimateDurationMinutes = (numGuests?: number) => {
+        const g = typeof numGuests === 'number' ? numGuests : 2;
+        if (g <= 2) return 60;
+        if (g <= 4) return 120;
+        return 150;
+      };
+      const timeToMin = (timeStr: string) => {
+        const parts = String(timeStr || '').split(':');
+        const h = Number(parts[0]) || 0;
+        const m = Number(parts[1]) || 0;
+        return (h % 24) * 60 + (m % 60);
+      };
+
+      const prevAdjustments: Record<string, { start?: number; end?: number }> = (() => {
+        try {
+          const raw = localStorage.getItem(`respoint-duration-adjustments:${prevKey}`);
+          const parsed = raw ? JSON.parse(raw) : {};
+          return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+          return {};
+        }
+      })();
+
+      return reservations.some((res: any) => {
+        if (res.date !== prevKey) return false;
+        if (res.cleared) return false;
+        if (!(res.status === 'waiting' || res.status === 'confirmed' || res.status === 'arrived')) return false;
+        const adj = prevAdjustments?.[res.id] || {};
+        const startMin = typeof adj.start === 'number' ? adj.start : timeToMin(res.time);
+        const endMin = typeof adj.end === 'number' ? adj.end : (startMin + estimateDurationMinutes(res.numberOfGuests));
+        return endMin > 1440;
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  // Check which dates have events (using allEventDates from context)
+  const hasEventsForDate = (date: Date): boolean => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const dateString = `${year}-${month}-${day}`;
+    
+    return allEventDates.includes(dateString);
   };
 
   // Navigate by day
@@ -261,6 +327,7 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                 const hasReservations = hasReservationsForDate(date);
                 const dayOfWeek = dayNames[date.getDay()];
                 const dateKeyStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+                const hasEvents = hasEventsForDate(date);
                 
                 // Calculate opacity for fadeout effect
                 const getOpacity = (index: number) => {
@@ -269,51 +336,150 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                   if (index === 2 || index === 4) return 0.7; // Third and third-to-last - moderately faded
                   return 1; // Center (index 3)
                 };
-                const getBackground = (): string => {
+                const getBackgroundStyle = () => {
                   const isLight = theme === 'light';
+                  // Gradient colors:
+                  // - Reservations only: orange gradient
+                  // - Events only: purple/pink gradient (like Create Event button)
+                  // - Both: mixed gradient (orange to purple)
+                  
+                  // Event gradient (purple to pink-red like Create Event button)
+                  const eventGradient = isLight
+                    ? 'linear-gradient(to bottom, #ffffff 0%, #E8D5F9 30%, #D759BE 60%, #8066D7 100%)'
+                    : 'linear-gradient(to bottom, #1E2A34 0%, #8066D7 35%, #D759BE 65%, #8137EA 100%)';
+                  
+                  // Reservation gradient (orange)
+                  const reservationGradient = isLight
+                    ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                    : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                  
+                  // Mixed gradient (reservation orange to event purple/pink)
+                  const mixedGradient = isLight
+                    ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 25%, #f59e0b 45%, #D759BE 70%, #8066D7 100%)'
+                    : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 25%, #BB621A 45%, #D759BE 70%, #8137EA 100%)';
+                  
+                  // Today's gradient (blue)
+                  const todayGradient = isLight
+                    ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
+                    : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                  
                   if (isToday) {
-                    if (hasReservations) {
-                      return isLight
-                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
-                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                    if (hasReservations && hasEvents) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: mixedGradient
+                      };
                     }
-                    return isLight
-                      ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
-                      : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                    if (hasEvents) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: eventGradient
+                      };
+                    }
+                    if (hasReservations) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: reservationGradient
+                      };
+                    }
+                    return {
+                      backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                      backgroundImage: todayGradient
+                    };
                   }
                   if (isCenter) {
-                    if (hasReservations) {
-                      return isLight
-                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
-                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                    if (hasReservations && hasEvents) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: mixedGradient
+                      };
                     }
-                    return isLight ? '#f1f5f9' : '#1E2A34';
+                    if (hasEvents) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: eventGradient
+                      };
+                    }
+                    if (hasReservations) {
+                      return {
+                        backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                        backgroundImage: reservationGradient
+                      };
+                    }
+                    return { backgroundColor: isLight ? '#f1f5f9' : '#1E2A34' };
                   }
-                  return isLight ? '#f8fafc' : '#1E2A34';
+                  return { backgroundColor: isLight ? '#f8fafc' : '#1E2A34' };
                 };
                 
+                const bgStyle = getBackgroundStyle();
+                const isLight = theme === 'light';
+
+                // Get the combined style for gradient borders with rounded corners
+                const getCombinedStyle = () => {
+                  const baseOpacity = getOpacity(idx);
+                  const baseBgColor = bgStyle.backgroundColor || (isLight ? '#f8fafc' : '#1E2A34');
+                  
+                  // If has gradient background (today, center with reservations/events), just use that
+                  if (bgStyle.backgroundImage) {
+                    return {
+                      ...bgStyle,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundSize: '100% 100%',
+                      backgroundPosition: 'center top',
+                      opacity: baseOpacity,
+                    };
+                  }
+                  
+                  // For non-center/non-today dates with events/reservations, use gradient border technique
+                  if (!isCenter && !isToday) {
+                    // Event gradient border (purple to pink)
+                    const eventBorderGradient = 'linear-gradient(to bottom, #8066D7, #D759BE, #8137EA)';
+                    // Reservation gradient border (orange)
+                    const reservationBorderGradient = 'linear-gradient(to bottom, #f59e0b, #ea580c, #dc2626)';
+                    // Mixed gradient border (orange to purple/pink)
+                    const mixedBorderGradient = 'linear-gradient(to bottom, #f59e0b, #ea580c, #D759BE, #8066D7)';
+                    
+                    let borderGradient = null;
+                    if (hasReservations && hasEvents) {
+                      borderGradient = mixedBorderGradient;
+                    } else if (hasEvents) {
+                      borderGradient = eventBorderGradient;
+                    } else if (hasReservations) {
+                      borderGradient = reservationBorderGradient;
+                    }
+                    
+                    if (borderGradient) {
+                      return {
+                        background: `linear-gradient(${baseBgColor}, ${baseBgColor}) padding-box, ${borderGradient} border-box`,
+                        border: '2px solid transparent',
+                        opacity: baseOpacity,
+                      };
+                    }
+                  }
+                  
+                  // Default - just background color
+                  return {
+                    backgroundColor: baseBgColor,
+                    opacity: baseOpacity,
+                  };
+                };
+                
+                const combinedStyle = getCombinedStyle();
+
                 return (
                   <div
                     key={dateKeyStr}
                     onClick={() => handleDateClick(date)}
                     className={`
-                      flex flex-col items-center justify-center rounded-2xl cursor-pointer overflow-hidden
+                      flex flex-col items-center justify-center rounded-2xl cursor-pointer
                       transition-all duration-300 relative flex-shrink-0
                       ${isCenter
                         ? "min-w-[48px] h-[68px] scale-110" // Larger only for selected/center
                         : "min-w-[42px] h-[58px]" // Normal size for all others
                       }
                       hover:opacity-90
-                      ${hasReservations && !isCenter && !isToday ? 'border-2 border-orange-500' : ''}
                     `}
-                    style={{
-                      background: getBackground(),
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: '100% 100%',
-                      backgroundPosition: 'center top',
-                      backgroundClip: 'padding-box',
-                      opacity: getOpacity(idx)
-                    }}
+                    style={combinedStyle}
                   >
                     <span className={`uppercase ${isCenter ? "text-[10px]" : "text-[9px]"}`} style={{ color: theme === 'light' ? '#64748b' : '#8891A7' }}>
                       {dayOfWeek}
@@ -531,30 +697,133 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                     const isToday = d.toDateString() === today.toDateString();
                     const isSelected = d.toDateString() === selectedDate.toDateString();
                     const hasRes = hasReservationsForDate(d);
+                    const hasEv = hasEventsForDate(d);
                     const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                    // Match header day tile design
-                    const getBackground = (): string => {
+                    // Match header day tile design without using 'background' shorthand
+                    const getBackgroundStyle = () => {
                       const isLight = theme === 'light';
+                      
+                      // Event gradient (purple to pink-red)
+                      const eventGradient = isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #E8D5F9 30%, #D759BE 60%, #8066D7 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #8066D7 35%, #D759BE 65%, #8137EA 100%)';
+                      
+                      // Reservation gradient (orange)
+                      const reservationGradient = isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                      
+                      // Mixed gradient (orange to purple/pink)
+                      const mixedGradient = isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 25%, #f59e0b 45%, #D759BE 70%, #8066D7 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 25%, #BB621A 45%, #D759BE 70%, #8137EA 100%)';
+                      
+                      // Today gradient (blue)
+                      const todayGradient = isLight
+                        ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
+                        : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                      
                       if (isToday) {
-                        if (hasRes) {
-                          return isLight
-                            ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
-                            : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                        if (hasRes && hasEv) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: mixedGradient
+                          };
                         }
-                        return isLight
-                          ? 'linear-gradient(to bottom, #ffffff 0%, #bfdbfe 60%, #93c5fd 100%)'
-                          : 'linear-gradient(to bottom, #1E2A34 0%, #345AA6 60%, #7EA0E3 100%)';
+                        if (hasEv) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: eventGradient
+                          };
+                        }
+                        if (hasRes) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: reservationGradient
+                          };
+                        }
+                        return {
+                          backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                          backgroundImage: todayGradient
+                        };
                       }
                       if (isSelected) {
-                        if (hasRes) {
-                          return theme === 'light'
-                            ? 'linear-gradient(to bottom, #ffffff 0%, #fde68a 60%, #f59e0b 100%)'
-                            : 'linear-gradient(to bottom, #1E2A34 0%, #87331C 60%, #BB621A 100%)';
+                        if (hasRes && hasEv) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: mixedGradient
+                          };
                         }
-                        return theme === 'light' ? '#f1f5f9' : '#1E2A34';
+                        if (hasEv) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: eventGradient
+                          };
+                        }
+                        if (hasRes) {
+                          return {
+                            backgroundColor: isLight ? '#ffffff' : '#1E2A34',
+                            backgroundImage: reservationGradient
+                          };
+                        }
+                        return { backgroundColor: isLight ? '#f1f5f9' : '#1E2A34' };
                       }
-                      return theme === 'light' ? '#f8fafc' : '#1E2A34';
+                      return { backgroundColor: isLight ? '#f8fafc' : '#1E2A34' };
                     };
+                    const bgStyle = getBackgroundStyle();
+                    
+                    // Get the combined style for gradient borders with rounded corners
+                    const getCombinedStyle = () => {
+                      const baseOpacity = isThisMonth ? 1 : 0.45;
+                      const baseBgColor = bgStyle.backgroundColor || (isLight ? '#f8fafc' : '#1E2A34');
+                      
+                      // If has gradient background (today, selected with reservations/events), just use that
+                      if (bgStyle.backgroundImage) {
+                        return {
+                          ...bgStyle,
+                          backgroundRepeat: 'no-repeat',
+                          backgroundSize: '100% 100%',
+                          backgroundPosition: 'center top',
+                          opacity: baseOpacity,
+                        };
+                      }
+                      
+                      // For non-selected/non-today dates with events/reservations, use gradient border technique
+                      if (!isSelected && !isToday) {
+                        // Event gradient border (purple to pink)
+                        const eventBorderGradient = 'linear-gradient(to bottom, #8066D7, #D759BE, #8137EA)';
+                        // Reservation gradient border (orange)
+                        const reservationBorderGradient = 'linear-gradient(to bottom, #f59e0b, #ea580c, #dc2626)';
+                        // Mixed gradient border (orange to purple/pink)
+                        const mixedBorderGradient = 'linear-gradient(to bottom, #f59e0b, #ea580c, #D759BE, #8066D7)';
+                        
+                        let borderGradient = null;
+                        if (hasRes && hasEv) {
+                          borderGradient = mixedBorderGradient;
+                        } else if (hasEv) {
+                          borderGradient = eventBorderGradient;
+                        } else if (hasRes) {
+                          borderGradient = reservationBorderGradient;
+                        }
+                        
+                        if (borderGradient) {
+                          return {
+                            background: `linear-gradient(${baseBgColor}, ${baseBgColor}) padding-box, ${borderGradient} border-box`,
+                            border: '2px solid transparent',
+                            opacity: baseOpacity,
+                          };
+                        }
+                      }
+                      
+                      // Default - just background color
+                      return {
+                        backgroundColor: baseBgColor,
+                        opacity: baseOpacity,
+                      };
+                    };
+                    
+                    const combinedStyle = getCombinedStyle();
+
                     return (
                       <button
                         key={`c-${dKey}`}
@@ -564,15 +833,8 @@ const Header: React.FC<HeaderProps> = ({ selectedDate, onDateChange }) => {
                           setShowMonthCalendar(false);
                           try { window.dispatchEvent(new CustomEvent('modal-close')); } catch {}
                         }}
-                        className={`flex flex-col items-center justify-center rounded-2xl overflow-hidden transition-all duration-200 border justify-self-center w-[42px] h-[58px] ${hasRes && !isSelected && !isToday ? 'border-orange-500' : 'border-transparent'}`}
-                        style={{
-                          background: getBackground(),
-                          backgroundRepeat: 'no-repeat',
-                          backgroundSize: '100% 100%',
-                          backgroundPosition: 'center top',
-                          backgroundClip: 'padding-box',
-                          opacity: isThisMonth ? 1 : 0.45
-                        }}
+                        className="flex flex-col items-center justify-center rounded-2xl transition-all duration-200 justify-self-center w-[42px] h-[58px]"
+                        style={combinedStyle}
                         title={d.toLocaleDateString()}
                       >
                         <span className="text-[10px] uppercase" style={{ color: theme === 'light' ? '#64748b' : '#8891A7' }}>

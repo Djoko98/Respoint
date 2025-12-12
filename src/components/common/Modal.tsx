@@ -9,6 +9,14 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
   hideCloseButton?: boolean;
   contentScrollable?: boolean;
+  fullScreen?: boolean;
+  hideHeaderBorder?: boolean;
+  /**
+   * Optional visual/layout variant.
+   * - 'default' (or undefined): centered modal over dimmed backdrop
+   * - 'canvas-right': full-height panel aligned with the canvas area (to the right of sidebar)
+   */
+  variant?: 'default' | 'canvas-right';
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -18,7 +26,10 @@ const Modal: React.FC<ModalProps> = ({
   children,
   size = 'md',
   hideCloseButton = false,
-  contentScrollable = true
+  contentScrollable = true,
+  fullScreen = false,
+  hideHeaderBorder = false,
+  variant = 'default'
 }) => {
   // Handle keyboard events
   useEffect(() => {
@@ -52,11 +63,35 @@ const Modal: React.FC<ModalProps> = ({
     '3xl': 'max-w-7xl'
   };
 
+  let wrapperClasses: string;
+  let innerClasses: string;
+
+  if (variant === 'canvas-right') {
+    // Panel aligned with the canvas area (to the right of the 20rem sidebar)
+    wrapperClasses =
+      'fixed left-80 right-0 bottom-0 top-[var(--titlebar-h)] bg-[#0A1929] z-[12000] flex items-stretch justify-center p-0';
+    innerClasses =
+      'bg-[#000814] w-full h-full max-w-none rounded-none shadow-none overflow-hidden flex flex-col';
+  } else if (fullScreen) {
+    wrapperClasses =
+      'fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm z-[12000] flex items-stretch justify-center p-0';
+    innerClasses =
+      'bg-[#000814] w-full h-full max-w-none rounded-none shadow-2xl overflow-hidden flex flex-col';
+  } else {
+    wrapperClasses =
+      'fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm z-[12000] flex items-center justify-center p-4';
+    innerClasses = `bg-[#000814] rounded-lg shadow-2xl w-full ${sizeClasses[size]} max-h-[92vh] overflow-hidden flex flex-col`;
+  }
+
+  const headerClasses = hideHeaderBorder
+    ? 'flex items-center justify-between px-6 py-4'
+    : 'flex items-center justify-between px-6 py-4 border-b border-gray-800';
+
   const modalContent = (
-    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm z-[12000] flex items-center justify-center p-4">
-      <div className={`bg-[#000814] rounded-lg shadow-2xl w-full ${sizeClasses[size]} max-h-[92vh] overflow-hidden flex flex-col`}>
+    <div className={wrapperClasses}>
+      <div className={innerClasses}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+        <div className={headerClasses}>
           <h2 className="text-xl font-light text-white tracking-wide">{title}</h2>
           {!hideCloseButton && (
             <button
@@ -72,7 +107,13 @@ const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className={`modal-content flex-1 ${contentScrollable ? 'overflow-y-auto statistics-scrollbar' : 'overflow-hidden'}`}>
+        <div
+          className={
+            contentScrollable
+              ? 'modal-content flex-1 overflow-y-auto statistics-scrollbar'
+              : 'modal-content flex-1 overflow-hidden flex flex-col'
+          }
+        >
           {children}
         </div>
       </div>

@@ -228,7 +228,7 @@
             </div>
         </div>
         
-        <!-- Password Reset View -->
+        <!-- Password Reset View (with form) -->
         <div id="password-reset-view" class="hidden">
             <div class="icon icon-password">
                 <svg viewBox="0 0 24 24">
@@ -257,6 +257,29 @@
             <p id="reset-success" class="success-text hidden">
                 ✓ Password updated successfully! You can now close this window and log in to ResPoint with your new password.
             </p>
+        </div>
+        
+        <!-- Password Reset Message View (when we can't reset on web) -->
+        <div id="password-reset-message-view" class="hidden">
+            <div class="icon icon-password">
+                <svg viewBox="0 0 24 24">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+            </div>
+            <h1>Password Reset Link Verified</h1>
+            <p class="subtitle">Your password reset request has been confirmed.</p>
+            
+            <div class="instruction instruction-blue">
+                <p>
+                    To complete the password reset, please <strong>open the ResPoint app</strong> and log in with your email. 
+                    You will be prompted to set a new password.
+                </p>
+            </div>
+            
+            <div style="margin-top: 16px; padding: 16px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; text-align: left;">
+                <p style="font-size: 13px; color: #9ca3af; margin-bottom: 8px;">Or try logging in with your current password - if you remember it, you can change it in Account Settings.</p>
+            </div>
         </div>
         
         <!-- Error View -->
@@ -301,6 +324,7 @@
         // DOM elements
         const verifiedView = document.getElementById('verified-view');
         const passwordResetView = document.getElementById('password-reset-view');
+        const passwordResetMessageView = document.getElementById('password-reset-message-view');
         const errorView = document.getElementById('error-view');
         const loadingView = document.getElementById('loading-view');
         const errorMessage = document.getElementById('error-message');
@@ -312,9 +336,14 @@
         function showView(view) {
             verifiedView.classList.add('hidden');
             passwordResetView.classList.add('hidden');
+            passwordResetMessageView.classList.add('hidden');
             errorView.classList.add('hidden');
             loadingView.classList.add('hidden');
             view.classList.remove('hidden');
+        }
+        
+        function showPasswordResetMessage() {
+            showView(passwordResetMessageView);
         }
         
         function showError(message) {
@@ -370,10 +399,19 @@
                 }
             } else if (code) {
                 // PKCE flow - code exchange requires code_verifier which is stored in the app
-                // The email is already verified when user clicks the link
-                // Just show success and let user go back to the app to log in
-                console.log('PKCE code detected - email verification successful');
-                showView(verifiedView);
+                // Check if this is a password recovery flow
+                const flow = params.get('flow');
+                
+                if (flow === 'recovery') {
+                    // Password reset - we can't exchange code without code_verifier
+                    // Show a message to reset password in the app
+                    console.log('Password recovery detected');
+                    showPasswordResetMessage();
+                } else {
+                    // Email verification - just show success
+                    console.log('PKCE code detected - email verification successful');
+                    showView(verifiedView);
+                }
             } else {
                 // No auth params - just show verified page (fallback)
                 showView(verifiedView);

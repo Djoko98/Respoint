@@ -408,11 +408,12 @@ export const ReservationProvider: React.FC<{ children: ReactNode }> = React.memo
           let nextEnd: number | undefined = undefined;
           if (typeof existing.start === 'number' && typeof existing.end === 'number') {
             const duration = Math.max(15, existing.end - existing.start);
-            nextEnd = Math.max(nextStart + 15, Math.min(1440, nextStart + duration));
+            // Allow crossing midnight (store as minutes since start of reservation day)
+            nextEnd = Math.max(nextStart + 15, Math.min(2880, nextStart + duration));
           } else if (typeof existing.end === 'number' && existing.start === undefined) {
             // If only end existed, attempt to preserve absolute end by shifting relative to newStart
             const duration = Math.max(15, existing.end - newStartMin);
-            nextEnd = Math.max(nextStart + 15, Math.min(1440, newStartMin + duration));
+            nextEnd = Math.max(nextStart + 15, Math.min(2880, newStartMin + duration));
           }
 
           // Persist locally

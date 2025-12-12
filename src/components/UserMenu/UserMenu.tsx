@@ -7,6 +7,7 @@ import Subscribe from "../Subscribe/Subscribe";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 import { ThemeContext } from "../../context/ThemeContext";
 import { useRolePermissions } from "../../hooks/useRolePermissions";
+import AboutModal from "../About/AboutModal";
 
 interface UserMenuProps {
   isOpen: boolean;
@@ -16,11 +17,12 @@ interface UserMenuProps {
 const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
   const { user, logout, isAuthenticated } = useContext(UserContext);
   const { hasPermission } = useRolePermissions();
-  const { t } = useLanguage();
+  const { t, currentLanguage } = useLanguage();
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [showStatistics, setShowStatistics] = useState(false);
   const [showSubscribe, setShowSubscribe] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const { theme } = useContext(ThemeContext);
   const isLight = theme === 'light';
 
@@ -50,9 +52,16 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
     onClose();
   };
 
+  const handleAbout = () => {
+    setShowAbout(true);
+    onClose();
+  };
+
   const canAccessSettings = hasPermission('access_account_settings');
   const canAccessSubscription = hasPermission('access_subscription');
   const canViewStatistics = hasPermission('access_statistics');
+
+  const aboutLabel = currentLanguage === 'srb' ? 'O aplikaciji' : 'About';
 
   const menuItems = [
     {
@@ -84,6 +93,18 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
       label: t('statistics'),
       action: handleStatistics,
       enabled: canViewStatistics
+    },
+    {
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11 7h2v2h-2V7zm0 4h2v6h-2v-6zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10
+          10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8
+          8-8 8 3.59 8 8-3.59 8-8 8z"/>
+        </svg>
+      ),
+      label: aboutLabel,
+      action: handleAbout,
+      enabled: true
     },
     {
       icon: (
@@ -176,6 +197,12 @@ const UserMenu: React.FC<UserMenuProps> = ({ isOpen, onClose }) => {
       <Subscribe
         isOpen={showSubscribe}
         onClose={() => setShowSubscribe(false)}
+      />
+
+      {/* About Modal */}
+      <AboutModal
+        isOpen={showAbout}
+        onClose={() => setShowAbout(false)}
       />
       
       {/* Logout Confirmation Modal */}

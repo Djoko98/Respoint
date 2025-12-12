@@ -32,6 +32,7 @@ export const authService = {
   async signUp(email: string, password: string, restaurantName: string, name?: string) {
     try {
       // Kreiraj korisnika u Supabase Auth
+      // Email verifikacija ide preko browser-a, aplikacija će automatski detektovati kada je email verifikovan
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -52,6 +53,7 @@ export const authService = {
           .from('profiles')
           .insert({
             id: authData.user.id,
+            email,
             restaurant_name: restaurantName,
             name: name || email.split('@')[0],
             role: 'admin', // Podrazumevano admin za novog korisnika
@@ -191,9 +193,14 @@ export const authService = {
   // Resetuj lozinku
   async resetPassword(email: string) {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      console.log('🔑 Sending password reset email to:', email);
+      
+      // Resetovanje lozinke - dodajemo ?type=recovery da stranica zna da prikaže formu za reset
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'https://djoko98.github.io/Respoint/?flow=recovery',
       });
+      
+      console.log('🔑 Reset password response:', { data, error });
       
       if (error) throw error;
       
@@ -202,7 +209,7 @@ export const authService = {
         message: 'Email za resetovanje lozinke je poslat!' 
       };
     } catch (error: any) {
-      console.error('ResetPassword error:', error);
+      console.error('❌ ResetPassword error:', error);
       return { 
         success: false, 
         error: error.message || 'Greška pri slanju emaila' 

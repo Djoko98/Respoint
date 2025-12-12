@@ -160,6 +160,7 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose, onSwitchToLo
       <EmailConfirmationModal
         isOpen={true}
         email={formData.email}
+        password={formData.password}
         onConfirmed={handleEmailConfirmed}
         onClose={handleCloseEmailConfirmation}
       />

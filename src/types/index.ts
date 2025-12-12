@@ -7,6 +7,16 @@ export type { Zone, ZoneDB } from './zone';
 // Reservation types
 export type { Reservation, ReservationDB, ReservationStatus } from './reservation';
 
+// Event types
+export type {
+  Event,
+  EventDB,
+  EventReservation,
+  EventReservationDB,
+  EventPaymentStatus,
+  EventReservationStatus
+} from './event';
+
 // Table and Layout types
 export type { 
   Table,

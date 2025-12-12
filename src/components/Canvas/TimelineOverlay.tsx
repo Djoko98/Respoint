@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ReservationContext } from '../../context/ReservationContext';
+import { EventContext } from '../../context/EventContext';
 import { ZoneContext } from '../../context/ZoneContext';
 import { LayoutContext } from '../../context/LayoutContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -67,8 +68,9 @@ const formatDate = (date: Date) => {
 };
 
 const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, selectedDate }) => {
-  const { t } = useLanguage();
+  const { t, currentLanguage } = useLanguage();
   const { reservations, updateReservation } = useContext(ReservationContext);
+  const { eventReservations, updateEventReservation } = useContext(EventContext);
   const { currentZone } = useContext(ZoneContext);
   const { zoneLayouts } = useContext(LayoutContext);
   const { theme } = React.useContext(ThemeContext);
@@ -117,51 +119,194 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
   const dateKey = formatDate(selectedDate || new Date());
   const todaysReservations = useMemo(() => {
     const allowed: string[] = ['waiting', 'confirmed', 'arrived', 'pending'];
-    return reservations.filter(r =>
-      r.date === dateKey && allowed.includes((r.status as unknown as string))
-    );
-  }, [reservations, dateKey]);
+    const prevDateObj = (() => {
+      try {
+        const d = new Date(`${dateKey}T00:00:00`);
+        d.setDate(d.getDate() - 1);
+        return d;
+      } catch {
+        return null;
+      }
+    })();
+    const prevDateKey = prevDateObj ? formatDate(prevDateObj) : null;
+
+    // Load adjustments for previous day from localStorage so we can render spillover blocks
+    const prevAdjustments: Record<string, { start?: number; end?: number }> = (() => {
+      if (!prevDateKey) return {};
+      try {
+        const raw = localStorage.getItem(`respoint-duration-adjustments:${prevDateKey}`);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+    
+    // Filter regular reservations – skip cleared ones (finished stays)
+    const filteredRegular = reservations
+      .filter(r => {
+        const status = r.status as unknown as string;
+        const dateMatches = r.date === dateKey;
+        const statusAllowed = allowed.includes(status);
+        const notCleared = !(r as any).cleared;
+        return dateMatches && statusAllowed && notCleared;
+      })
+      .map(r => ({ ...r, isEventReservation: false }));
+
+    // Spillover regular reservations from previous day into this day (crossing midnight)
+    const spilloverRegular = prevDateKey
+      ? reservations
+          .filter(r => {
+            const status = r.status as unknown as string;
+            const dateMatches = r.date === prevDateKey;
+            const statusAllowed = allowed.includes(status);
+            const notCleared = !(r as any).cleared;
+            return dateMatches && statusAllowed && notCleared;
+          })
+          .map(r => {
+            const baseStart = timeStringToMinutes(r.time);
+            const adj = prevAdjustments?.[r.id] || {};
+            const startMin = typeof adj.start === 'number' ? adj.start : baseStart;
+            const endMin = typeof adj.end === 'number' ? adj.end : (startMin + estimateDurationMinutes(r.numberOfGuests));
+            if (endMin <= 1440) return null;
+            const spillEnd = Math.max(0, Math.min(1440, endMin - 1440));
+            if (spillEnd <= 0) return null;
+            return {
+              ...r,
+              date: dateKey,
+              time: '00:00',
+              isEventReservation: false,
+              __spillover: true,
+              __sourceDateKey: prevDateKey,
+              __sourceStartMin: startMin,
+              __sourceEndMin: endMin,
+              __spillStartMin: 0,
+              __spillEndMin: spillEnd,
+            } as any;
+          })
+          .filter(Boolean)
+      : [];
+
+    // Filter and map event reservations – skip cleared ones as well
+    // 'booked' is equivalent to 'waiting' for events
+    const eventAllowed = ['booked', 'arrived'];
+    const filteredEvent = eventReservations
+      .filter(r => {
+        const dateMatches = r.date === dateKey;
+        const statusAllowed = eventAllowed.includes(r.status);
+        const notCleared = !(r as any).cleared;
+        return dateMatches && statusAllowed && notCleared;
+      })
+      .map(r => ({
+        id: r.id,
+        date: r.date,
+        time: r.time,
+        numberOfGuests: r.numberOfGuests,
+        guestName: r.guestName,
+        phone: r.phone || '',
+        notes: r.notes || '',
+        status: r.status === 'booked' ? 'waiting' : r.status,
+        tableIds: r.tableIds || [],
+        zoneId: r.zoneId || '',
+        color: r.color,
+        isVip: r.isVip || false,
+        isEventReservation: true,
+        reservationCode: r.reservationCode,
+      }));
+
+    // Spillover event reservations from previous day into this day
+    const spilloverEvent = prevDateKey
+      ? eventReservations
+          .filter(r => {
+            const dateMatches = r.date === prevDateKey;
+            const statusAllowed = eventAllowed.includes(r.status);
+            const notCleared = !(r as any).cleared;
+            return dateMatches && statusAllowed && notCleared;
+          })
+          .map(r => {
+            const baseStart = timeStringToMinutes(r.time);
+            const adj = prevAdjustments?.[r.id] || {};
+            const startMin = typeof adj.start === 'number' ? adj.start : baseStart;
+            const endMin = typeof adj.end === 'number' ? adj.end : (startMin + estimateDurationMinutes(r.numberOfGuests));
+            if (endMin <= 1440) return null;
+            const spillEnd = Math.max(0, Math.min(1440, endMin - 1440));
+            if (spillEnd <= 0) return null;
+            return {
+              id: r.id,
+              date: dateKey,
+              time: '00:00',
+              numberOfGuests: r.numberOfGuests,
+              guestName: r.guestName,
+              phone: r.phone || '',
+              notes: r.notes || '',
+              status: r.status === 'booked' ? 'waiting' : r.status,
+              tableIds: r.tableIds || [],
+              zoneId: r.zoneId || '',
+              color: r.color,
+              isVip: r.isVip || false,
+              isEventReservation: true,
+              reservationCode: r.reservationCode,
+              __spillover: true,
+              __sourceDateKey: prevDateKey,
+              __sourceStartMin: startMin,
+              __sourceEndMin: endMin,
+              __spillStartMin: 0,
+              __spillEndMin: spillEnd,
+            } as any;
+          })
+          .filter(Boolean)
+      : [];
+
+    return [...filteredRegular, ...(spilloverRegular as any[]), ...filteredEvent, ...(spilloverEvent as any[])];
+  }, [reservations, eventReservations, dateKey]);
 
   // Manual block adjustments (per reservation id) - start/end in minutes from 00:00
   const [blockAdjustments, setBlockAdjustments] = useState<Record<string, { start: number; end: number }>>({});
-  // Load saved adjustments for this date (DB first, fallback to localStorage) - shared with sidebar timers
+  // Load saved adjustments for this date - localStorage first (fast), then sync from DB in background
   useEffect(() => {
     let didCancel = false;
-    (async () => {
-      const fromDb = await reservationAdjustmentsService.getByDate(dateKey);
-      if (!didCancel && fromDb && Object.keys(fromDb).length > 0) {
-        setBlockAdjustments(fromDb as any);
-        return;
-      }
-      try {
-        const key = `respoint-duration-adjustments:${dateKey}`;
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            if (!didCancel) setBlockAdjustments(parsed);
-          }
-        } else {
-          if (!didCancel) setBlockAdjustments({});
+    // Immediate: load from localStorage for fast render
+    try {
+      const key = `respoint-duration-adjustments:${dateKey}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          setBlockAdjustments(parsed);
         }
-      } catch {
-        if (!didCancel) setBlockAdjustments({});
+      } else {
+        setBlockAdjustments({});
       }
+    } catch {
+      setBlockAdjustments({});
+    }
+    // Background: sync from DB (non-blocking)
+    (async () => {
+      try {
+        const fromDb = await reservationAdjustmentsService.getByDate(dateKey);
+        if (!didCancel && fromDb && Object.keys(fromDb).length > 0) {
+          setBlockAdjustments(prev => {
+            // Merge DB data with current state to avoid overwriting local changes
+            const merged = { ...prev };
+            for (const [id, adj] of Object.entries(fromDb)) {
+              if (!merged[id]) merged[id] = adj as any;
+            }
+            return merged;
+          });
+        }
+      } catch {}
     })();
     return () => { didCancel = true; };
   }, [dateKey]);
 
-  // Live adjustments listener (respond to external +15 extensions or edits)
+  // Live adjustments listener (respond to EXTERNAL +15 extensions or edits)
+  // Optimized: read only from localStorage (faster), debounced to prevent rapid updates
+  const reloadTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isOpen) return;
     let isActive = true;
-    const reloadAdjustments = async () => {
+    const reloadAdjustments = () => {
       if (!isActive) return;
-      const fromDb = await reservationAdjustmentsService.getByDate(dateKey);
-      if (isActive && fromDb && Object.keys(fromDb).length > 0) {
-        setBlockAdjustments(fromDb as any);
-        return;
-      }
       try {
         const key = `respoint-duration-adjustments:${dateKey}`;
         const raw = localStorage.getItem(key);
@@ -173,22 +318,31 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
     };
     const handler = (e: any) => {
       if (!e?.detail || e.detail.date !== dateKey) return;
-      reloadAdjustments();
+      // Ignore events originating from this TimelineOverlay instance itself.
+      if (e.detail.source === 'timeline') return;
+      // Debounce: cancel pending reload and schedule a new one
+      if (reloadTimeoutRef.current) window.clearTimeout(reloadTimeoutRef.current);
+      reloadTimeoutRef.current = window.setTimeout(reloadAdjustments, 50);
     };
     window.addEventListener('respoint-duration-adjustments-changed', handler as any);
     return () => {
       isActive = false;
+      if (reloadTimeoutRef.current) window.clearTimeout(reloadTimeoutRef.current);
       window.removeEventListener('respoint-duration-adjustments-changed', handler as any);
     };
   }, [isOpen, dateKey]);
-  // Persist adjustments and notify listeners (sidebar seated timers)
+  // Persist adjustments and notify listeners (Sidebar / other views)
   useEffect(() => {
     try {
       const key = `respoint-duration-adjustments:${dateKey}`;
       localStorage.setItem(key, JSON.stringify(blockAdjustments || {}));
     } catch {}
     try {
-      window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date: dateKey } }));
+      window.dispatchEvent(
+        new CustomEvent('respoint-duration-adjustments-changed', {
+          detail: { date: dateKey, source: 'timeline' }
+        })
+      );
     } catch {}
   }, [blockAdjustments, dateKey]);
   const MIN_BLOCK_MINUTES = 15;
@@ -267,14 +421,35 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
     serviceType?: string;
     status?: string;
     isVip?: boolean;
+    isEventReservation?: boolean;
   }>> = useMemo(() => {
     const map: Record<string | number, Array<any>> = {};
     for (const r of todaysReservations) {
-      const defaultStart = snapMinutes(timeStringToMinutes(r.time));
-      const defaultEnd = snapMinutes(Math.min(1440, defaultStart + estimateDurationMinutes(r.numberOfGuests)));
+      const isSpill = Boolean((r as any).__spillover);
+      const defaultStart = isSpill ? 0 : snapMinutes(timeStringToMinutes(r.time));
+      const defaultEndRaw = isSpill
+        ? Number((r as any).__spillEndMin ?? 0)
+        : (defaultStart + estimateDurationMinutes(r.numberOfGuests));
+      const defaultEnd = snapMinutes(Math.min(1440, defaultEndRaw));
       const adj = blockAdjustments[r.id];
-      const startMin = snapMinutes(Math.max(0, Math.min(1440, adj?.start ?? defaultStart)));
-      const endMin = snapMinutes(Math.max(startMin + MIN_BLOCK_MINUTES, Math.min(1440, adj?.end ?? defaultEnd)));
+      const startMin = isSpill
+        ? 0
+        : snapMinutes(Math.max(0, Math.min(1440, adj?.start ?? defaultStart)));
+      // IMPORTANT: spillover blocks are visually part of this day, but their persisted adjustment
+      // lives on the previous day. If there is a stale adjustment for THIS dateKey with end>=1440,
+      // it would incorrectly stretch to "full day". So for spillovers we only accept an end value
+      // in [0..1440]; otherwise fall back to the computed spill end.
+      const adjEndCandidate = typeof adj?.end === 'number' ? adj.end : undefined;
+      // For spillovers, ignore a stale "end=1440" coming from a wrong adjustment row on this day
+      // unless this spillover actually reaches 24:00 (defaultEnd==1440).
+      const safeAdjEndForThisDay = (typeof adjEndCandidate === 'number'
+        && adjEndCandidate >= 0
+        && adjEndCandidate <= 1440
+        && (defaultEnd === 1440 || adjEndCandidate < 1440))
+        ? adjEndCandidate
+        : undefined;
+      const endBase = isSpill ? (safeAdjEndForThisDay ?? defaultEnd) : (adj?.end ?? defaultEnd);
+      const endMin = snapMinutes(Math.max(startMin + MIN_BLOCK_MINUTES, Math.min(1440, endBase)));
       const left = minutesToPercent(snapMinutes(startMin));
       const right = minutesToPercent(snapMinutes(endMin));
       const width = Math.max(0.5, right - left); // min visual width
@@ -291,7 +466,12 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
         endMin,
         serviceType: (r as any).notes || (r as any).serviceType || '',
         status: (r as any).status || 'waiting',
-        isVip: !!r.isVip
+        isVip: !!r.isVip,
+        isEventReservation: !!(r as any).isEventReservation,
+        __spillover: isSpill,
+        __sourceDateKey: (r as any).__sourceDateKey,
+        __sourceStartMin: (r as any).__sourceStartMin,
+        __sourceEndMin: (r as any).__sourceEndMin,
       };
       const tableIds: any[] = Array.isArray(r.tableIds) ? r.tableIds : [];
       for (const tableIdRaw of tableIds) {
@@ -322,6 +502,22 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const nowPercent = showNow ? minutesToPercent(nowMinutes) : 0;
   const nowLabel = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  
+  // Helper: scroll to the beginning of the timeline (00:00)
+  const scrollToStart = React.useCallback((smooth: boolean) => {
+    const wrapper = scrollWrapperRef.current;
+    if (!wrapper) return;
+    try {
+      if (smooth) {
+        wrapper.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        wrapper.scrollLeft = 0;
+      }
+    } catch {
+      wrapper.scrollLeft = 0;
+    }
+  }, []);
+
   // Helper: center the "now" line in the scroll viewport
   const centerNowInView = React.useCallback((smooth: boolean) => {
     if (!showNow) return;
@@ -343,19 +539,27 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
     }
   }, [nowMinutes, showNow]);
 
-  // Center on open and when zoom changes
+  // Center on open and when zoom/date changes
+  // - For today: center the "now" line
+  // - For other dates: scroll to start (00:00)
   useEffect(() => {
     if (!isOpen) return;
     // wait a frame for layout
-    const id = requestAnimationFrame(() => centerNowInView(false));
+    const id = requestAnimationFrame(() => {
+      if (showNow) {
+        centerNowInView(false);
+      } else {
+        scrollToStart(false);
+      }
+    });
     return () => cancelAnimationFrame(id);
-  }, [isOpen, zoomScale, centerNowInView]);
+  }, [isOpen, zoomScale, centerNowInView, scrollToStart, showNow, dateKey]);
 
-  // Keep following current time while overlay is open (every 30s update)
+  // Keep following current time while overlay is open (every 30s update) - only for today
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !showNow) return;
     centerNowInView(true);
-  }, [nowMinutes, centerNowInView, isOpen]);
+  }, [nowMinutes, centerNowInView, isOpen, showNow]);
 
   // Total reserved guests per table for the selected date (current zone)
   const reservedGuestsByTable = useMemo(() => {
@@ -577,7 +781,7 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                 return (
                                   <div
                                     key={`${table.id}-${b.id}-${b.left}`}
-                                    className={`absolute top-1 bottom-1 rounded-md border ${theme === 'light' ? 'border-gray-200' : 'border-black/30'} shadow-sm overflow-visible group cursor-grab active:cursor-grabbing`}
+                                    className={`absolute top-0 bottom-0 rounded-md border ${theme === 'light' ? 'border-gray-200' : 'border-black/30'} shadow-sm overflow-visible group cursor-grab active:cursor-grabbing`}
                                     style={{
                                       // Use local dragging override for smooth visuals without recomputing maps
                                       left: (() => {
@@ -590,10 +794,23 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                         const end = draggingBlock?.id === b.id ? draggingBlock.endMin : b.endMin;
                                         const left = minutesToPercent(snapMinutes(start));
                                         const right = minutesToPercent(snapMinutes(end));
-                                        return `${Math.max(0.05, right - left)}%`;
+                                        const raw = Math.max(0.05, right - left);
+                                        // Clamp so blocks never overflow past the 24:00 edge (fixes spillover edge overflow)
+                                        const clamped = Math.max(0.05, Math.min(raw, Math.max(0.05, 100 - left)));
+                                        return `${clamped}%`;
                                       })(),
-                                      backgroundColor: b.color,
-                                      willChange: 'left, width'
+                                      ...(b.isEventReservation
+                                        ? {
+                                            // Inner gradient border with reservation color fill
+                                            backgroundImage: `linear-gradient(${b.color}, ${b.color}), linear-gradient(90deg, #8066D7, #D759BE, #3773EA, #8137EA)`,
+                                            backgroundOrigin: 'border-box',
+                                            backgroundClip: 'padding-box, border-box',
+                                            borderColor: 'transparent',
+                                            borderWidth: '2px'
+                                          }
+                                        : {
+                                            backgroundColor: b.color
+                                          })
                                     }}
                                     onDoubleClick={(e) => {
                                       e.stopPropagation();
@@ -608,6 +825,8 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                       if (target && target.closest('.cursor-ew-resize')) return;
                                       // Disable moving entire block for arrived reservations
                                       if (b.status === 'arrived') return;
+                                      // Spillover blocks (from previous day) are not moveable (start is fixed at 00:00)
+                                      if ((b as any).__spillover) return;
                                       e.preventDefault();
                                       const track = (e.currentTarget as HTMLElement).closest('.rp-row-track') as HTMLElement | null;
                                       if (!track) return;
@@ -662,12 +881,27 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                         // Persist adjustments if values are valid
                                         reservationAdjustmentsService.upsertAdjustment(dateKey, b.id, { start: currentStartMin, end: currentEndMin });
                                         setBlockAdjustments(prev => ({ ...prev, [b.id]: { start: currentStartMin, end: currentEndMin } }));
+                                        // Persist locally for immediate updates (Canvas rings / Sidebar timers)
+                                        try {
+                                          const key = `respoint-duration-adjustments:${dateKey}`;
+                                          const raw = localStorage.getItem(key);
+                                          const parsed = raw ? JSON.parse(raw) : {};
+                                          parsed[b.id] = { start: currentStartMin, end: currentEndMin };
+                                          localStorage.setItem(key, JSON.stringify(parsed));
+                                        } catch {}
+                                        try { window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date: dateKey } })); } catch {}
                                         // Update reservation time to keep Sidebar and sorting in sync
                                         const hh = Math.floor(currentStartMin / 60);
                                         const mm = currentStartMin % 60;
                                         const hhStr = hh.toString().padStart(2, '0');
                                         const mmStr = mm.toString().padStart(2, '0');
-                                        try { updateReservation(b.id, { time: `${hhStr}:${mmStr}` }); } catch {}
+                                        try { 
+                                          if (b.isEventReservation) {
+                                            updateEventReservation(b.id, { time: `${hhStr}:${mmStr}` });
+                                          } else {
+                                            updateReservation(b.id, { time: `${hhStr}:${mmStr}` }); 
+                                          }
+                                        } catch {}
                                         setDraggingBlock(null);
                                         // Restore body styles
                                         document.body.style.userSelect = prevSelect;
@@ -693,8 +927,12 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                     ) : null}
                                     {/* Resize handles */}
                                     <div
-                                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${theme === 'light' ? 'bg-white/40' : 'bg-black/20'} ${b.status === 'arrived' ? 'opacity-30 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}
+                                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${theme === 'light' ? 'bg-white/40' : 'bg-black/20'} ${
+                                        (b as any).__spillover || b.status === 'arrived' ? 'opacity-30 pointer-events-none' : 'opacity-0 group-hover:opacity-100'
+                                      }`}
                                       onMouseDown={(e) => {
+                                        // Spillover blocks start at 00:00 in this day's view - cannot adjust left edge
+                                        if ((b as any).__spillover) return;
                                         e.preventDefault();
                                         const track = (e.currentTarget as HTMLElement).closest('.rp-row-track') as HTMLElement | null;
                                         if (!track) return;
@@ -742,13 +980,26 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                           reservationAdjustmentsService.upsertAdjustment(dateKey, b.id, { start: currentStart, end: initialEnd });
                                           // Commit to global adjustments once (recomputes maps a single time)
                                           setBlockAdjustments(prev => ({ ...prev, [b.id]: { start: currentStart, end: initialEnd } }));
+                                          // Persist locally for immediate updates
+                                          try {
+                                            const key = `respoint-duration-adjustments:${dateKey}`;
+                                            const raw = localStorage.getItem(key);
+                                            const parsed = raw ? JSON.parse(raw) : {};
+                                            parsed[b.id] = { start: currentStart, end: initialEnd };
+                                            localStorage.setItem(key, JSON.stringify(parsed));
+                                          } catch {}
+                                          try { window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date: dateKey } })); } catch {}
                                           // Update reservation start time so Sidebar reflects the change immediately
                                           try {
                                             const hh = Math.floor(currentStart / 60);
                                             const mm = currentStart % 60;
                                             const hhStr = hh.toString().padStart(2, '0');
                                             const mmStr = mm.toString().padStart(2, '0');
+                                            if (b.isEventReservation) {
+                                              updateEventReservation(b.id, { time: `${hhStr}:${mmStr}` });
+                                            } else {
                                             updateReservation(b.id, { time: `${hhStr}:${mmStr}` });
+                                            }
                                           } catch {}
                                           setDraggingBlock(null);
                                         // Restore body styles
@@ -760,8 +1011,12 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                       }}
                                     />
                                     <div
-                                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${theme === 'light' ? 'bg-white/40' : 'bg-black/20'} opacity-0 group-hover:opacity-100`}
+                                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${theme === 'light' ? 'bg-white/40' : 'bg-black/20'} ${
+                                        (b as any).__spillover ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'
+                                      }`}
                                       onMouseDown={(e) => {
+                                        // Spillover blocks are read-only - resize only from original day
+                                        if ((b as any).__spillover) return;
                                         e.preventDefault();
                                         const track = (e.currentTarget as HTMLElement).closest('.rp-row-track') as HTMLElement | null;
                                         if (!track) return;
@@ -786,69 +1041,131 @@ const TimelineOverlay: React.FC<TimelineOverlayProps> = ({ isOpen, onClose, sele
                                         };
                                         let currentEnd = initialEnd;
                                       const onMove = (ev: MouseEvent) => {
-                                          const relX = ev.clientX - trackRect.left;
-                                          const pointerMinRaw = relX * pixelsToMinutes;
-                                          const pointerMin = Math.max(0, Math.min(1440, Number.isFinite(pointerMinRaw) ? pointerMinRaw : 0));
-                                          const snapped = snapMinutes(pointerMin);
-                                          // Allow both extend and shorten, but keep at least MIN_BLOCK_MINUTES after start
-                                          const neighborMaxEnd = Math.min(Number.isFinite(nextBlockStart) ? nextBlockStart : 1440, 1440);
-                                          const newEnd = Math.min(neighborMaxEnd, Math.max(initialStart + MIN_BLOCK_MINUTES, snapped));
-                                          if (newEnd !== currentEnd) {
-                                            currentEnd = newEnd;
-                                            scheduleUpdate(currentEnd);
+                                        const relX = ev.clientX - trackRect.left;
+                                        const pointerMinRaw = relX * pixelsToMinutes;
+                                        const pointerMin = Math.max(0, Math.min(1440, Number.isFinite(pointerMinRaw) ? pointerMinRaw : 0));
+                                        const snapped = snapMinutes(pointerMin);
+                                        // Allow both extend and shorten, but:
+                                        // - keep at least MIN_BLOCK_MINUTES after start
+                                        // - never extend past 1440 (midnight) or next block
+                                        // - for ARRIVED (seated) reservations, never allow end before the *exact* current time line
+                                        const neighborMaxEnd = Math.min(
+                                          Number.isFinite(nextBlockStart) ? nextBlockStart : 1440,
+                                          1440
+                                        );
+                                        let minEndAllowed = initialStart + MIN_BLOCK_MINUTES;
+                                        if (b.status === 'arrived' && showNow) {
+                                          const nowMin = now.getHours() * 60 + now.getMinutes();
+                                          if (Number.isFinite(nowMin)) {
+                                            minEndAllowed = Math.max(minEndAllowed, nowMin);
                                           }
-                                        };
-                                        const onUp = () => {
+                                          // If the next block (or end of day) is already before the
+                                          // "now" line, do not allow any shortening at all.
+                                          if (neighborMaxEnd <= minEndAllowed) {
+                                            return;
+                                          }
+                                        }
+                                        const newEnd = Math.min(neighborMaxEnd, Math.max(minEndAllowed, snapped));
+                                        if (newEnd !== currentEnd) {
+                                          currentEnd = newEnd;
+                                          scheduleUpdate(currentEnd);
+                                        }
+                                      };
+                                        const onUp = async () => {
                                           if (frame) cancelAnimationFrame(frame);
                                           window.removeEventListener('mousemove', onMove);
                                           window.removeEventListener('mouseup', onUp);
+                                          const persistDate = dateKey;
+                                          const persistStart = initialStart;
+                                          const persistEnd = currentEnd;
+
                                           // Persist to DB
-                                          reservationAdjustmentsService.upsertAdjustment(dateKey, b.id, { start: initialStart, end: currentEnd });
-                                          // Commit once to global map
+                                          reservationAdjustmentsService.upsertAdjustment(persistDate, b.id, { start: persistStart, end: persistEnd });
+                                          // Persist locally for immediate updates (keyed by persistDate)
+                                          try {
+                                            const key = `respoint-duration-adjustments:${persistDate}`;
+                                            const raw = localStorage.getItem(key);
+                                            const parsed = raw ? JSON.parse(raw) : {};
+                                            parsed[b.id] = { start: persistStart, end: persistEnd };
+                                            localStorage.setItem(key, JSON.stringify(parsed));
+                                          } catch {}
+                                          try { window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date: persistDate } })); } catch {}
+
+                                          // Commit once to overlay map (for this day visuals)
                                           setBlockAdjustments(prev => ({ ...prev, [b.id]: { start: initialStart, end: currentEnd } }));
                                           setDraggingBlock(null);
                                           // Restore body styles
                                           document.body.style.userSelect = prevSelect;
                                           document.body.style.cursor = prevCursor;
+
+                                          // Auto-shift subsequent reservations if extending caused overlap
+                                          // Only for seated (arrived) reservations being extended
+                                          if (b.status === 'arrived' && currentEnd > initialEnd) {
+                                            try {
+                                              // Find all reservations on the same table(s) for this date
+                                              const thisBlockTables = todaysReservations.find(r => r.id === b.id)?.tableIds || [];
+                                              
+                                              // Find all reservations that might overlap with the new end time
+                                              const overlappingReservations = todaysReservations.filter(r => {
+                                                if (r.id === b.id) return false; // Skip self
+                                                if ((r as any).status === 'arrived') return false; // Don't shift seated reservations
+                                                if ((r as any).cleared) return false; // Skip cleared
+                                                
+                                                // Check if shares any table
+                                                const rTables = (r.tableIds || []) as any[];
+                                                const sharesTables = thisBlockTables.some((tid: any) => 
+                                                  rTables.some((rtid: any) => String(tid) === String(rtid))
+                                                );
+                                                if (!sharesTables) return false;
+                                                
+                                                // Check if this reservation's start time is before our new end
+                                                const adj = blockAdjustments[r.id];
+                                                const rStartMin = adj?.start ?? snapMinutes(timeStringToMinutes(r.time));
+                                                
+                                                // Only shift if the reservation starts within the extended time
+                                                return rStartMin < currentEnd && rStartMin >= initialEnd;
+                                              });
+
+                                              // Shift overlapping reservations
+                                              for (const r of overlappingReservations) {
+                                                const adj = blockAdjustments[r.id];
+                                                const rStartMin = adj?.start ?? snapMinutes(timeStringToMinutes(r.time));
+                                                const rEndMin = adj?.end ?? snapMinutes(Math.min(1440, rStartMin + estimateDurationMinutes(r.numberOfGuests)));
+                                                
+                                                // Calculate shift amount
+                                                const shiftAmount = currentEnd - rStartMin;
+                                                const newStartMin = rStartMin + shiftAmount;
+                                                const newEndMin = Math.min(1440, rEndMin + shiftAmount);
+                                                
+                                                // Convert minutes back to time string
+                                                const newHour = Math.floor(newStartMin / 60);
+                                                const newMinute = newStartMin % 60;
+                                                const newTime = `${newHour.toString().padStart(2, '0')}:${newMinute.toString().padStart(2, '0')}`;
+                                                
+                                                // Update the reservation time
+                                                if ((r as any).isEventReservation) {
+                                                  await updateEventReservation(r.id, { time: newTime });
+                                                } else {
+                                                  await updateReservation(r.id, { time: newTime });
+                                                }
+                                                
+                                                // Also update the adjustments to reflect new position
+                                                reservationAdjustmentsService.upsertAdjustment(dateKey, r.id, { start: newStartMin, end: newEndMin });
+                                                setBlockAdjustments(prev => ({ ...prev, [r.id]: { start: newStartMin, end: newEndMin } }));
+                                              }
+                                            } catch (err) {
+                                              console.error('Failed to shift overlapping reservations:', err);
+                                            }
+                                          }
                                         };
                                         window.addEventListener('mousemove', onMove);
                                         window.addEventListener('mouseup', onUp);
                                       }}
                                     />
                                     <div className="h-full w-full px-3 py-1 flex flex-col justify-center overflow-hidden">
-                                      {/* Top row: Timer + Guest name • people */}
+                                      {/* Top row: Guest name */}
                                       <div className="flex items-center gap-2 text-[12px] text-white/95 whitespace-nowrap overflow-hidden">
-                                        {/* Left: circular countdown - visible only when arrived */}
-                                        {b.status === 'arrived' ? (() => {
-                                          const nowMin = now.getHours() * 60 + now.getMinutes();
-                                          const duration = Math.max(1, b.endMin - b.startMin);
-                                          const elapsed = Math.max(0, Math.min(duration, nowMin - b.startMin));
-                                          const progress = elapsed / duration;
-                                          const deg = Math.round(progress * 360);
-                                          return (
-                                            <div className="relative w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
-                                              <div
-                                                className="absolute inset-0 rounded-full"
-                                                style={{
-                                                  // Progress in 20% white; remainder in solid white
-                                                  background: `conic-gradient(rgba(255,255,255,0.2) ${deg}deg, #ffffff ${deg}deg)`
-                                                }}
-                                              />
-                                              <div className="absolute inset-[2px] rounded-full" />
-                                            </div>
-                                          );
-                                        })() : null}
-                                        <span className="font-medium truncate max-w-[62%]">{b.label}</span>
-                                        <span className="opacity-80">•</span>
-                                        <span className="flex items-center gap-1 text-white/90">
-                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                                            <circle cx="9" cy="7" r="4"/>
-                                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                                          </svg>
-                                          <span className="leading-none">{b.guests || 0}</span>
-                                        </span>
+                                        <span className="font-medium truncate max-w-[100%]">{b.label}</span>
                                       </div>
                                       {/* Bottom row: Service type • time range */}
                                       <div className="mt-0.5 text-[11px] text-white/90 whitespace-nowrap overflow-hidden text-ellipsis flex items-center gap-2">

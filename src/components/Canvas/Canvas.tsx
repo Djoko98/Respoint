@@ -1,10 +1,12 @@
-import React, { useState, useContext, useRef, useEffect, useCallback } from "react";
+import React, { useState, useContext, useRef, useEffect, useCallback, useMemo } from "react";
 import { useCanvasLayout, Layout } from "../../hooks/useCanvasLayout";
 import { ZoneContext } from "../../context/ZoneContext";
 import { UserContext } from "../../context/UserContext";
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { ReservationContext } from "../../context/ReservationContext";
 import { Reservation } from "../../types/reservation";
+import { EventContext } from "../../context/EventContext";
+import type { EventReservation } from "../../types/event";
 import ReservationForm from "../ReservationForm/ReservationForm";
 import TimelineBar from "./TimelineBar";
 import TimelineOverlay from "./TimelineOverlay";
@@ -48,7 +50,15 @@ const LayoutList: React.FC<LayoutListProps> = ({
   // Access current working layout to reflect live table count for default layout
   const { layout: workingLayout } = useCanvasLayout();
 
-  const zoneSavedLayouts = currentZone ? (savedLayouts[currentZone.id] || []) : [];
+  const zoneSavedLayoutsRaw = currentZone ? (savedLayouts[currentZone.id] || []) : [];
+  // Default layouts first, then others by created_at (newest first)
+  const zoneSavedLayouts = zoneSavedLayoutsRaw.slice().sort((a: any, b: any) => {
+    if (a.is_default && !b.is_default) return -1;
+    if (!a.is_default && b.is_default) return 1;
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
   const defaultLayout = getDefaultLayout();
   
   // Helper: count only real tables, exclude chairs stored in tables array
@@ -63,7 +73,7 @@ const LayoutList: React.FC<LayoutListProps> = ({
     zoneSavedLayouts.forEach((sl: any) => {
       console.log(`- ${sl.name}: ${countRealTables(sl.layout)} tables (real)`);
     });
-  }, [savedLayouts, currentZone]);
+  }, [savedLayouts, currentZone, zoneSavedLayouts.length]);
 
   const handleLoad = (layoutId: string) => {
     loadSavedLayout(layoutId);
@@ -208,9 +218,9 @@ const LayoutList: React.FC<LayoutListProps> = ({
           setLayoutToDelete(null);
         }}
         onConfirm={confirmDeleteLayout}
-        title={t('deleteZoneTitle')}
-        message={t('deleteZoneMessage')}
-        confirmText={t('deleteZoneButton')}
+        title={t('deleteLayout')}
+        message={t('deleteLayoutMessage')}
+        confirmText={t('deleteLayoutButton')}
         type="delete"
       />
     </motion.div>
@@ -594,6 +604,454 @@ const isWallInSelectionBox = (wall: any, box: any) => {
   // Use precise line-rectangle intersection instead of bounding box
   return doesLineIntersectRect(wall.x1, wall.y1, wall.x2, wall.y2, boxLeft, boxTop, boxRight, boxBottom);
 };
+
+// === Shared progress components (top-level to avoid remount flicker) ===
+
+// Helpers for seated reservations (ARRIVED) - countdown to estimated end
+const estimateSeatedDurationMinutes = (numGuests?: number) => {
+  const g = typeof numGuests === 'number' ? numGuests : 2;
+  if (g <= 2) return 60;
+  if (g <= 4) return 120;
+  return 150;
+};
+
+// Progress stroke for seated reservations – aligned to the table edge
+const SeatedProgressStrokeBase: React.FC<{
+  shape: 'rect' | 'circle';
+  tableWidth: number;
+  tableHeight: number;
+  rotation: number;
+  color: string;
+  reservation: Reservation;
+  gap?: number;
+  strokeWidth?: number;
+  borderRadiusPx?: number;
+  tableId?: string; // Optional: for table-specific end time limits
+}> = ({ shape, tableWidth, tableHeight, rotation, color, reservation, gap = 4, strokeWidth = 3, borderRadiusPx = 8, tableId }) => {
+  const [progress, setProgress] = useState(0);
+  const updateRef = useRef<() => void>(() => {});
+  
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+    const update = () => {
+      try {
+        const start = new Date(`${reservation.date}T${reservation.time}`);
+        let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
+        let endMin: number | null = null;
+        
+        try {
+          const key = `respoint-duration-adjustments:${reservation.date}`;
+          const raw = localStorage.getItem(key);
+          const parsed = raw ? JSON.parse(raw) : {};
+          const adj = parsed?.[reservation.id];
+          if (adj && typeof adj.end === 'number') {
+            endMin = adj.end;
+          }
+        } catch {}
+        
+        // Check for table-specific limit (when a table has an upcoming reservation)
+        if (tableId) {
+          try {
+            const tableLimitsKey = `respoint-table-limits:${reservation.date}`;
+            const rawLimits = localStorage.getItem(tableLimitsKey);
+            if (rawLimits) {
+              const tableLimits = JSON.parse(rawLimits);
+              const tableLimit = tableLimits?.[reservation.id]?.[tableId];
+              if (typeof tableLimit === 'number') {
+                // Use the earlier of: reservation end time or table-specific limit
+                if (endMin === null || tableLimit < endMin) {
+                  endMin = tableLimit;
+                }
+              }
+            }
+          } catch {}
+        }
+        
+        if (endMin !== null) {
+          const midnight = new Date(`${reservation.date}T00:00:00`);
+          // Allow spilling into next day (e.g. 23:00 + 2h30 => 1530 minutes)
+          end = new Date(midnight.getTime() + Math.max(0, Math.min(2880, endMin)) * 60 * 1000);
+        }
+        
+        const now = new Date();
+        const p = (now.getTime() - start.getTime()) / Math.max(1, (end.getTime() - start.getTime()));
+        setProgress(Math.max(0, Math.min(1, p)));
+      } catch {
+        setProgress(0);
+      }
+    };
+    updateRef.current = update;
+    update();
+    interval = setInterval(update, 1000);
+    return () => { if (interval) clearInterval(interval); };
+  }, [reservation.date, reservation.time, reservation.id, reservation.numberOfGuests, tableId]);
+
+  // Listen for duration adjustment changes and immediately update
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e?.detail?.date === reservation.date) {
+        updateRef.current();
+      }
+    };
+    window.addEventListener('respoint-duration-adjustments-changed', handler);
+    window.addEventListener('respoint-table-limits-changed', handler);
+    return () => {
+      window.removeEventListener('respoint-duration-adjustments-changed', handler);
+      window.removeEventListener('respoint-table-limits-changed', handler);
+    };
+  }, [reservation.date]);
+
+  const isExpired = progress >= 1 - 1e-6;
+
+  // Build dashed strokeDasharray that covers only the visible progress length,
+  // then a single trailing gap to hide the remainder (no repetition).
+  const buildDashedArray = (visibleLen: number, totalLen: number, dashLen: number = 8, gapLen: number = 6) => {
+    let remaining = Math.max(0, Math.min(totalLen, visibleLen));
+    const parts: number[] = [];
+    let acc = 0;
+    while (remaining > 0.5) {
+      const d = Math.min(dashLen, remaining);
+      parts.push(d);
+      acc += d;
+      remaining -= d;
+      if (remaining <= 0.5) break;
+      const g = Math.min(gapLen, remaining);
+      parts.push(g);
+      acc += g;
+      remaining -= g;
+    }
+    const trailingGap = Math.max(0, totalLen - acc);
+    if (trailingGap > 0) parts.push(Math.max(trailingGap, totalLen * 2)); // oversize gap to prevent pattern repetition
+    return parts.join(' ');
+  };
+
+  if (shape === 'rect') {
+    // Draw a stroke that hugs the table edge (centered on the outer "border" of the table)
+    // so visually it sits exactly on the table outline, not inset.
+    const drawW = Math.max(0, tableWidth - strokeWidth);
+    const drawH = Math.max(0, tableHeight - strokeWidth);
+    const x = strokeWidth / 2;
+    const y = strokeWidth / 2;
+    const rEff = Math.min(Math.max(0, borderRadiusPx), drawW / 2, drawH / 2);
+    const perimeter = 2 * (drawW + drawH);
+    const visibleLen = Math.max(0, Math.min(perimeter, progress * perimeter));
+    const dashArray = buildDashedArray(visibleLen, perimeter, 3, 5); // dashed progress (unused with mask, kept for reference)
+    const startX = x + drawW / 2;
+    const startY = y;
+    const d = [
+      `M ${startX} ${startY}`,
+      `H ${x + drawW - rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
+      `V ${y + drawH - rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
+      `H ${x + rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
+      `V ${y + rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
+      `H ${startX}`
+    ].join(' ');
+    const maskId = `seated-mask-${reservation.id}-rect`;
+    return (
+      <div className="absolute inset-0 pointer-events-none"
+           style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
+        <svg width={tableWidth} height={tableHeight}>
+          <defs>
+            <mask id={maskId}>
+              <path
+                d={d}
+                fill="none"
+                stroke="white"
+                strokeWidth={strokeWidth + 1}
+                pathLength={perimeter as unknown as number}
+                strokeDasharray={`${perimeter} ${perimeter}`}
+                strokeDashoffset={Math.max(0, perimeter - visibleLen)}
+                strokeLinecap="butt"
+              />
+            </mask>
+          </defs>
+          {/* Base dashed track */}
+          <path d={d} fill="none" stroke={color} strokeOpacity={0.25} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="butt" />
+          {/* Masked dashed progress */}
+          <path d={d} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="round" mask={`url(#${maskId})`} className={isExpired ? 'respoint-stroke-pulse' : undefined} />
+        </svg>
+      </div>
+    );
+  }
+  // circle – stroke centered on the edge of the circular table,
+  // starting at 12 o'clock and moving clockwise as time passes.
+  const rx = Math.max(2, tableWidth / 2 - strokeWidth / 2);
+  const ry = Math.max(2, tableHeight / 2 - strokeWidth / 2);
+  const cx = tableWidth / 2;
+  const cy = tableHeight / 2;
+
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  // Slightly below 1 to avoid full 360° arc issues with SVG A command
+  const effectiveProgress = Math.min(clampedProgress, 0.9999);
+  const angle = effectiveProgress * 2 * Math.PI;
+
+  // Start at 12 o'clock (−90°) and sweep clockwise
+  const startAngle = -Math.PI / 2;
+  const endAngle = startAngle + angle;
+
+  const x0 = cx + rx * Math.cos(startAngle);
+  const y0 = cy + ry * Math.sin(startAngle);
+  const x1 = cx + rx * Math.cos(endAngle);
+  const y1 = cy + ry * Math.sin(endAngle);
+
+  const largeArcFlag = angle > Math.PI ? 1 : 0;
+  const sweepFlag = 1; // clockwise
+
+  const d = `M ${x0} ${y0} A ${rx} ${ry} 0 ${largeArcFlag} ${sweepFlag} ${x1} ${y1}`;
+
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
+    >
+      <svg width={tableWidth} height={tableHeight}>
+        {/* Base dashed track around whole circle */}
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={rx}
+          ry={ry}
+          fill="none"
+          stroke={color}
+          strokeOpacity={0.25}
+          strokeWidth={strokeWidth}
+          strokeDasharray="3 5"
+        />
+        {/* Progress arc: starts at 12h and grows clockwise */}
+        {clampedProgress > 0 && (
+          <path
+            d={d}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray="3 5"
+            strokeLinecap="round"
+            className={isExpired ? 'respoint-stroke-pulse' : undefined}
+          />
+        )}
+      </svg>
+    </div>
+  );
+};
+
+// Outer progress stroke around table (outside with gap), filling as time approaches
+const ProgressStrokeBase: React.FC<{
+  shape: 'rect' | 'circle';
+  tableWidth: number;
+  tableHeight: number;
+  rotation: number;
+  color: string;
+  reservationDate: string;
+  reservationTime: string;
+  createdAt?: string;
+  gap?: number; // space between table edge and stroke
+  strokeWidth?: number;
+  windowMinutes?: number; // fallback window if createdAt missing
+  borderRadiusPx?: number; // for rect shape, match table rounding
+}> = ({
+  shape,
+  tableWidth,
+  tableHeight,
+  rotation,
+  color,
+  reservationDate,
+  reservationTime,
+  createdAt,
+  gap = 4,
+  strokeWidth = 4,
+  windowMinutes = 60,
+  borderRadiusPx = 8
+}) => {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+
+    const update = () => {
+      try {
+        const target = new Date(`${reservationDate}T${reservationTime}`);
+        const now = new Date();
+        if (isNaN(target.getTime())) { setProgress(0); return; }
+
+        // Determine start time: reservation createdAt if provided, otherwise fallback (windowMinutes before target)
+        const start = createdAt ? new Date(createdAt) : new Date(target.getTime() - windowMinutes * 60 * 1000);
+        const startMs = start.getTime();
+        const endMs = target.getTime();
+
+        if (!isFinite(startMs) || startMs >= endMs) {
+          // Fallback to last windowMinutes if createdAt invalid or after target
+          const fallbackStart = new Date(target.getTime() - windowMinutes * 60 * 1000);
+          const p =
+            now.getTime() <= fallbackStart.getTime() ? 0 :
+            now.getTime() >= endMs ? 1 :
+            (now.getTime() - fallbackStart.getTime()) / (endMs - fallbackStart.getTime());
+          setProgress(Math.max(0, Math.min(1, p)));
+          return;
+        }
+
+        // Progress from creation time until arrival time
+        const p =
+          now.getTime() <= startMs ? 0 :
+          now.getTime() >= endMs ? 1 :
+          (now.getTime() - startMs) / (endMs - startMs);
+        setProgress(Math.max(0, Math.min(1, p)));
+      } catch {
+        setProgress(0);
+      }
+    };
+
+    update();
+    interval = setInterval(update, 1000);
+    return () => { if (interval) clearInterval(interval); };
+  }, [reservationDate, reservationTime, createdAt, windowMinutes]);
+
+  const isExpired = progress >= 1 - 1e-6;
+
+  // Container grows to sit outside the table by gap + half stroke each side
+  const outerPad = gap + strokeWidth;
+  const containerW = tableWidth + outerPad * 2;
+  const containerH = tableHeight + outerPad * 2;
+
+  // We rotate the whole overlay to align with the table orientation
+  // The inner SVG coordinates remain unrotated and we draw at (strokeWidth/2) margin.
+
+  if (shape === 'rect') {
+    const drawW = containerW - strokeWidth;
+    const drawH = containerH - strokeWidth;
+    // Effective corner radius applied on the ring (clamped to valid rect radius constraints)
+    const rEff = Math.min(Math.max(0, borderRadiusPx + gap), drawW / 2, drawH / 2);
+    // Build a path that starts at the middle of the top edge and goes clockwise
+    const x = strokeWidth / 2;
+    const y = strokeWidth / 2;
+    const startX = x + drawW / 2;
+    const startY = y;
+    const d = [
+      `M ${startX} ${startY}`,
+      `H ${x + drawW - rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
+      `V ${y + drawH - rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
+      `H ${x + rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
+      `V ${y + rEff}`,
+      `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
+      `H ${startX}`
+    ].join(' ');
+
+    return (
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          transform: `rotate(${rotation}deg)`,
+          transformOrigin: 'center',
+          left: -outerPad,
+          top: -outerPad,
+          width: containerW,
+          height: containerH
+        }}
+      >
+        <svg width={containerW} height={containerH}>
+          {/* Base track (always full ring) */}
+          <rect
+            x={strokeWidth / 2}
+            y={strokeWidth / 2}
+            width={drawW}
+            height={drawH}
+            rx={Math.max(0, borderRadiusPx + gap)}
+            ry={Math.max(0, borderRadiusPx + gap)}
+            fill="none"
+            stroke={color}
+            strokeOpacity={0.25}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+          />
+          <path
+            d={d}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            pathLength={1 as any}
+            strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
+            strokeLinecap="round"
+            className={isExpired ? 'respoint-stroke-pulse' : undefined}
+          />
+        </svg>
+        {isExpired ? (
+          <div
+            className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
+            style={{
+              borderRadius: Math.max(0, (borderRadiusPx + gap + strokeWidth / 2)),
+              zIndex: 10049,
+              ['--rp-glow-color' as any]: color
+            }}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  // circle (ellipse) ring
+  const rx = tableWidth / 2 + gap + strokeWidth / 2;
+  const ry = tableHeight / 2 + gap + strokeWidth / 2;
+  const cx = containerW / 2;
+  const cy = containerH / 2;
+  // Use pathLength normalization to express progress 0..1 and rotate so start is at 12 o'clock
+
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{
+        transform: `rotate(${rotation}deg)`,
+        transformOrigin: 'center',
+        left: -outerPad,
+        top: -outerPad,
+        width: containerW,
+        height: containerH
+      }}
+    >
+      <svg width={containerW} height={containerH}>
+        {/* Base track (always full ring) */}
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={rx}
+          ry={ry}
+          fill="none"
+          stroke={color}
+          strokeOpacity={0.25}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${cx} ${cy})`}
+          pathLength={1 as any}
+        />
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={rx}
+          ry={ry}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          pathLength={1 as any}
+          strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${cx} ${cy})`}
+          className={isExpired ? 'respoint-stroke-pulse' : undefined}
+        />
+      </svg>
+      {isExpired ? (
+        <div
+          className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
+          style={{ borderRadius: '9999px', zIndex: 10049, ['--rp-glow-color' as any]: color }}
+        />
+      ) : null}
+    </div>
+  );
+};
 const Canvas: React.FC<CanvasProps> = ({
   selectedTool,
   onToolChange,
@@ -639,6 +1097,187 @@ const Canvas: React.FC<CanvasProps> = ({
   const isLight = theme === 'light';
 
   const { reservations } = useContext(ReservationContext);
+  const { eventReservations } = useContext(EventContext);
+
+  // Combine regular reservations with event reservations for canvas display
+  // We map event reservations to a compatible shape for reuse in existing logic
+  const combinedReservations = useMemo(() => {
+    // Selected day keys (local YYYY-MM-DD)
+    const selectedKey = (() => {
+      const d = selectedDate || new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    })();
+    const prevKey = (() => {
+      const d = new Date(`${selectedKey}T00:00:00`);
+      d.setDate(d.getDate() - 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    })();
+
+    const timeToMin = (timeStr: string) => {
+      const parts = String(timeStr || '').split(':');
+      const h = Number(parts[0]) || 0;
+      const m = Number(parts[1]) || 0;
+      return (h % 24) * 60 + (m % 60);
+    };
+    const estimateDurationMinutes = (numGuests?: number) => {
+      const g = typeof numGuests === 'number' ? numGuests : 2;
+      if (g <= 2) return 60;
+      if (g <= 4) return 120;
+      return 150;
+    };
+    const prevAdjustments: Record<string, { start?: number; end?: number }> = (() => {
+      try {
+        const raw = localStorage.getItem(`respoint-duration-adjustments:${prevKey}`);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    // Map regular reservations with isEventReservation: false
+    const mappedRegularReservations = reservations.map((r) => ({
+      ...r,
+      isEventReservation: false,
+    }));
+    // Map event reservations to a compatible interface
+    const mappedEventReservations = eventReservations.map((er): Reservation & { isEventReservation: boolean; cleared?: boolean } => ({
+      id: er.id,
+      date: er.date,
+      time: er.time,
+      numberOfGuests: er.numberOfGuests,
+      guestName: er.guestName,
+      phone: er.phone || '',
+      email: er.email || '',
+      notes: er.notes || '',
+      status: er.status === 'booked' ? 'waiting' : (er.status === 'arrived' ? 'arrived' : er.status === 'not_arrived' ? 'not_arrived' : 'cancelled') as any,
+      tableIds: er.tableIds || [],
+      zoneId: er.zoneId || '',
+      color: er.color,
+      isVip: er.isVip || false,
+      createdAt: er.createdAt || new Date().toISOString(),
+      updatedAt: er.updatedAt || new Date().toISOString(),
+      user_id: er.userId,
+      isEventReservation: true,
+      cleared: er.cleared || false,
+    }));
+
+    // Spillover from previous day into selected day (show on table map as occupied/seated)
+    const regularSpilloverForSelected = mappedRegularReservations
+      .filter((r: any) => {
+        if (r.date !== prevKey) return false;
+        if ((r as any).cleared) return false;
+        if (!(r.status === 'waiting' || r.status === 'confirmed' || r.status === 'arrived')) return false;
+        const adj = prevAdjustments?.[r.id] || {};
+        const startMin = typeof adj.start === 'number' ? adj.start : timeToMin(r.time);
+        const endMin = typeof adj.end === 'number' ? adj.end : (startMin + estimateDurationMinutes(r.numberOfGuests));
+        return endMin > 1440;
+      })
+      .map((r: any) => ({
+        ...r,
+        date: selectedKey,
+        time: '00:00',
+        // Preserve status: booked spillover stays waiting/confirmed, seated spillover stays arrived
+        status: r.status,
+        isEventReservation: false,
+        __spilloverFromPrevDay: true,
+        __spilloverSourceDate: prevKey,
+        __spilloverSourceTime: r.time,
+        __spilloverSourceStatus: r.status,
+      }));
+
+    const eventSpilloverForSelected = mappedEventReservations
+      .filter((r: any) => {
+        if (r.date !== prevKey) return false;
+        if ((r as any).cleared) return false;
+        // Allow both booked/waiting and arrived spillover
+        if (!(r.status === 'waiting' || r.status === 'confirmed' || r.status === 'arrived')) return false;
+        const adj = prevAdjustments?.[r.id] || {};
+        const startMin = typeof adj.start === 'number' ? adj.start : timeToMin(r.time);
+        const endMin = typeof adj.end === 'number' ? adj.end : (startMin + estimateDurationMinutes(r.numberOfGuests));
+        return endMin > 1440;
+      })
+      .map((r: any) => ({
+        ...r,
+        date: selectedKey,
+        time: '00:00',
+        status: r.status,
+        isEventReservation: true,
+        __spilloverFromPrevDay: true,
+        __spilloverSourceDate: prevKey,
+        __spilloverSourceTime: r.time,
+        __spilloverSourceStatus: r.status,
+      }));
+
+    // Combine both arrays + spillovers for selected day
+    return [
+      ...mappedRegularReservations,
+      ...mappedEventReservations,
+      ...regularSpilloverForSelected,
+      ...eventSpilloverForSelected,
+    ];
+  }, [reservations, eventReservations, selectedDate]);
+
+  // Track which reservation index to display for tables with multiple reservations
+  const [tableReservationIndexes, setTableReservationIndexes] = useState<Record<string, number>>({});
+
+  // Canvas view offset (per-device, per-zone) so each workstation can nudge the layout position
+  const [canvasOffset, setCanvasOffset] = useState<{ x: number; y: number }>(() => {
+    try {
+      const userIdPart = user?.id ? `user_${user.id}` : 'user_anon';
+      const zoneIdPart = currentZone?.id ? `zone_${currentZone.id}` : 'zone_default';
+      const key = `respoint_canvas_offset_${userIdPart}_${zoneIdPart}`;
+      return loadFromStorage<{ x: number; y: number }>(key, { x: 0, y: 0 });
+    } catch {
+      return { x: 0, y: 0 };
+    }
+  });
+
+  // Track the zone/user that the current canvasOffset belongs to, to avoid saving stale values
+  const offsetBelongsToRef = useRef<{ zoneId: string | undefined; userId: string | undefined }>({
+    zoneId: currentZone?.id,
+    userId: user?.id
+  });
+
+  // Reload offset when active user or zone changes
+  useEffect(() => {
+    try {
+      const userIdPart = user?.id ? `user_${user.id}` : 'user_anon';
+      const zoneIdPart = currentZone?.id ? `zone_${currentZone.id}` : 'zone_default';
+      const key = `respoint_canvas_offset_${userIdPart}_${zoneIdPart}`;
+      const stored = loadFromStorage<{ x: number; y: number }>(key, { x: 0, y: 0 });
+      // Update the ref BEFORE setting state, so save effect knows offset now belongs to new zone
+      offsetBelongsToRef.current = { zoneId: currentZone?.id, userId: user?.id };
+      setCanvasOffset(stored);
+    } catch {
+      offsetBelongsToRef.current = { zoneId: currentZone?.id, userId: user?.id };
+      setCanvasOffset({ x: 0, y: 0 });
+    }
+  }, [user?.id, currentZone?.id]);
+
+  // Persist offset per device/zone - only save if offset belongs to current zone/user
+  useEffect(() => {
+    // Skip saving if the offset doesn't belong to the current zone/user (stale value from previous zone)
+    if (offsetBelongsToRef.current.zoneId !== currentZone?.id ||
+        offsetBelongsToRef.current.userId !== user?.id) {
+      return;
+    }
+    try {
+      const userIdPart = user?.id ? `user_${user.id}` : 'user_anon';
+      const zoneIdPart = currentZone?.id ? `zone_${currentZone.id}` : 'zone_default';
+      const key = `respoint_canvas_offset_${userIdPart}_${zoneIdPart}`;
+      saveToStorage(key, canvasOffset);
+    } catch {
+      // ignore storage errors
+    }
+  }, [canvasOffset, user?.id, currentZone?.id]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   // Canvas bounds helpers to keep elements within visible area
@@ -722,7 +1361,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const dragThresholdPassed = useRef(false);
   const isDraggingElements = useRef(false);
   const wasElementDragged = useRef(false);
-  const groupScaleInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number, fontSize?: number } }>({});
+  const groupScaleInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number, rotation?: number, fontSize?: number, type?: string } }>({});
   const groupRotationInitialStates = useRef<{ [id: string]: { x: number, y: number, width: number, height: number, rotation: number } }>({});
   
   // Hover state for handles
@@ -973,6 +1612,38 @@ const Canvas: React.FC<CanvasProps> = ({
         const rotDeg2 = normalizeAngle((side === 'top' ? 0 : 180) + (parent.rotation || 0));
         const nxTopLeftX2 = wx2 - sepW / 2;
         const nxTopLeftY2 = wy2 - sepH / 2;
+        return {
+          ...t,
+          x: shouldSnap ? snapToGrid(nxTopLeftX2) : nxTopLeftX2,
+          y: shouldSnap ? snapToGrid(nxTopLeftY2) : nxTopLeftY2,
+          width: sepW,
+          height: sepH,
+          rotation: rotDeg2,
+          attachedSide: side,
+          attachedT: 0.5,
+          attachedOffsetPx: 0,
+          boothThickness: wall
+        };
+      }
+      if (variant === 'boothU' && (side === 'left' || side === 'right') && parent.type !== 'circle') {
+        const wall = (t as any).boothThickness || RECT_U_WALL_PX;
+        // Za levo/desno koristimo visinu stola kao „dužinu stranice“, analogno širini za top/bottom
+        const sepW = h + wall * 2;
+        const sepH = w + wall;
+        const rotDeg = parent.rotation || 0;
+        const rotRad = rotDeg * Math.PI / 180;
+        const cxWorld = cx;
+        const cyWorld = cy;
+        const sign = side === 'left' ? -1 : 1;
+        const localDx = sign * (wall / 2);
+        const localDy = 0;
+        const offX = localDx * Math.cos(rotRad) - localDy * Math.sin(rotRad);
+        const offY = localDx * Math.sin(rotRad) + localDy * Math.cos(rotRad);
+        const sepCenterX = cxWorld + offX;
+        const sepCenterY = cyWorld + offY;
+        const nxTopLeftX2 = sepCenterX - sepW / 2;
+        const nxTopLeftY2 = sepCenterY - sepH / 2;
+        const rotDeg2 = normalizeAngle((side === 'left' ? 270 : 90) + (parent.rotation || 0));
         return {
           ...t,
           x: shouldSnap ? snapToGrid(nxTopLeftX2) : nxTopLeftX2,
@@ -1425,71 +2096,235 @@ const Canvas: React.FC<CanvasProps> = ({
       const startDeg = ((Number(guides.circleStartDeg) || 0) % 360 + 360) % 360;
       const perSeatVariants: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'> =
         Array.from({ length: count }, (_, i) => (guides.circleVariants?.[i] || guides.circleVariant || 'standard'));
+      const perSeatSizes: Array<{ w?: number; h?: number }> | undefined =
+        (guides as any).circleSeatSizes || undefined;
       if (count > 0) {
+        // 1) Pronađi centre svih separea (polukružni i U) – oni definišu blokirane polovine kruga.
+        const arcCenters: number[] = [];
+        for (let i = 0; i < count; i++) {
+          const v = perSeatVariants[i];
+          if (v === 'boothCurved' || v === 'boothU') {
+            const angleDeg = startDeg + (360 * i / count);
+            arcCenters.push(normalizeAngle(angleDeg));
+          }
+        }
+
+        // Izgradi blokirane intervale oko svakog separea (±90°).
+        const buildBlockedIntervals = (): Array<{ start: number; end: number }> => {
+          const intervals: Array<{ start: number; end: number }> = [];
+          const pushInterval = (start: number, end: number) => {
+            const s = normalizeAngle(start);
+            const e = normalizeAngle(end);
+            if (s === e) return;
+            if (s < e) {
+              intervals.push({ start: s, end: e });
+            } else {
+              intervals.push({ start: s, end: 360 });
+              intervals.push({ start: 0, end: e });
+            }
+          };
+
+          for (const c of arcCenters) {
+            pushInterval(c - 90, c + 90);
+          }
+
+          if (!intervals.length) return [];
+
+          intervals.sort((a, b) => a.start - b.start);
+          const merged: Array<{ start: number; end: number }> = [];
+          let cur = { ...intervals[0] };
+          for (let i = 1; i < intervals.length; i++) {
+            const iv = intervals[i];
+            if (iv.start <= cur.end) {
+              cur.end = Math.max(cur.end, iv.end);
+            } else {
+              merged.push(cur);
+              cur = { ...iv };
+            }
+          }
+          merged.push(cur);
+          return merged;
+        };
+
+        const blocked = buildBlockedIntervals();
+
+        // 2) Izračunaj slobodne lukove (komplement blokiranih u [0, 360)).
+        const freeArcs: Array<{ start: number; end: number }> = [];
+        if (!blocked.length) {
+          freeArcs.push({ start: 0, end: 360 });
+        } else {
+          let cursor = 0;
+          for (const iv of blocked) {
+            if (iv.start > cursor) {
+              freeArcs.push({ start: cursor, end: iv.start });
+            }
+            cursor = Math.max(cursor, iv.end);
+          }
+          if (cursor < 360) {
+            freeArcs.push({ start: cursor, end: 360 });
+          }
+        }
+
+        const totalFreeAngle = freeArcs.reduce((sum, iv) => sum + (iv.end - iv.start), 0);
+
+        // 3) Prvo dodaj sve separe-e kao kružne lukove na centru stola.
         for (let i = 0; i < count; i++) {
           const variant = perSeatVariants[i];
+          if (variant !== 'boothCurved' && variant !== 'boothU') continue;
+
           const angleDeg = startDeg + (360 * i / count);
           const a = angleDeg * Math.PI / 180;
-          if (variant === 'boothCurved' || variant === 'boothU') {
-            // Render as an arc centered on the table center so the inner edge is flush with the circle
-            const thickness = variant === 'boothCurved' ? BOOTH_ARC_THICKNESS_CURVED : BOOTH_ARC_THICKNESS_U;
-            const outerR = r + thickness;
-            const outerD = outerR * 2;
-            const innerRatio = (r / outerR) * 50; // viewBox units for inner arc radius
-            const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
-            toAdd.push({
-              id: `chair-${table.id}-${Date.now()}-${i}`,
-              number: 0,
-              name: '',
-              seats: 1,
-              x: clampX(cx - outerD / 2, outerD),
-              y: clampY(cy - outerD / 2, outerD),
-              width: outerD,
-              height: outerD,
-              type: 'chair' as const,
-              chairVariant: variant as any,
-              rotation: rotationDeg,
-              color: '#CBD5E1',
-              status: 'available' as const,
-              attachedToTableId: table.id,
-              attachedAngleDeg: angleDeg,
-              arcInnerRatio: innerRatio // for rendering an exact arc in the chair component
-            });
+          const thickness = variant === 'boothCurved' ? BOOTH_ARC_THICKNESS_CURVED : BOOTH_ARC_THICKNESS_U;
+          const outerR = r + thickness;
+          const outerD = outerR * 2;
+          const innerRatio = (r / outerR) * 50; // viewBox units for inner arc radius
+          const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+          toAdd.push({
+            id: `chair-${table.id}-${Date.now()}-${i}`,
+            number: 0,
+            name: '',
+            seats: 4, // polukružni i U separe se računaju kao 4 mesta
+            x: clampX(cx - outerD / 2, outerD),
+            y: clampY(cy - outerD / 2, outerD),
+            width: outerD,
+            height: outerD,
+            type: 'chair' as const,
+            chairVariant: variant as any,
+            rotation: rotationDeg,
+            color: '#CBD5E1',
+            status: 'available' as const,
+            attachedToTableId: table.id,
+            attachedAngleDeg: angleDeg,
+            arcInnerRatio: innerRatio // for rendering an exact arc in the chair component
+          });
+        }
+
+        // 4) Skupljamo indekse za obične stolice (standard / barstool / booth).
+        const seatIndices: number[] = [];
+        for (let i = 0; i < count; i++) {
+          const v = perSeatVariants[i];
+          if (v !== 'boothCurved' && v !== 'boothU') {
+            seatIndices.push(i);
+          }
+        }
+
+        const m = seatIndices.length;
+        if (m > 0) {
+          if (!arcCenters.length || totalFreeAngle <= 0) {
+            // Nema separea – rasporedi stolice klasično oko celog kruga.
+            for (let idx = 0; idx < m; idx++) {
+              const i = seatIndices[idx];
+              const variant = perSeatVariants[i];
+              const angleDeg = startDeg + (360 * i / count);
+              const a = angleDeg * Math.PI / 180;
+              const baseSize = getDefaultAutoChairSize(variant as any, 'horizontal');
+              const szOverride = perSeatSizes && perSeatSizes[i] ? perSeatSizes[i] : undefined;
+              const size = { w: baseSize.w, h: baseSize.h };
+              if (szOverride?.w != null) {
+                size.w = Math.max(4, szOverride.w);
+              } else if (chairWidthOverride != null) {
+                size.w = chairWidthOverride;
+              }
+              if (szOverride?.h != null) {
+                size.h = Math.max(4, szOverride.h);
+              } else if (chairHeightOverride != null) {
+                size.h = chairHeightOverride;
+              }
+              const inset = getChairVariantInsetPx(variant, size.w, size.h);
+              const half = Math.min(size.w, size.h) / 2;
+              const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+              const centerX = cx + Math.cos(a) * (r + offset);
+              const centerY = cy + Math.sin(a) * (r + offset);
+              const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+              toAdd.push({
+                id: `chair-${table.id}-${Date.now()}-${i}`,
+                number: 0,
+                name: '',
+                seats: 1,
+                x: clampX(centerX - size.w / 2, size.w),
+                y: clampY(centerY - size.h / 2, size.h),
+                width: size.w,
+                height: size.h,
+                type: 'chair' as const,
+                chairVariant: variant as any,
+                rotation: rotationDeg,
+                color: '#CBD5E1',
+                status: 'available' as const,
+                attachedToTableId: table.id,
+                attachedAngleDeg: angleDeg
+              });
+            }
           } else {
-            const baseSize = getDefaultAutoChairSize(variant as any, 'horizontal');
-            const size = {
-              w: chairWidthOverride ?? baseSize.w,
-              h: chairHeightOverride ?? baseSize.h
-            };
-            const inset = getChairVariantInsetPx(variant, size.w, size.h);
-            const half = Math.min(size.w, size.h) / 2;
-            const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
-            const centerX = cx + Math.cos(a) * (r + offset);
-            const centerY = cy + Math.sin(a) * (r + offset);
-            const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
-            toAdd.push({
-              id: `chair-${table.id}-${Date.now()}-${i}`,
-              number: 0,
-              name: '',
-              seats: 1,
-              x: clampX(centerX - size.w / 2, size.w),
-              y: clampY(centerY - size.h / 2, size.h),
-              width: size.w,
-              height: size.h,
-              type: 'chair' as const,
-              chairVariant: variant as any,
-              rotation: rotationDeg,
-              color: '#CBD5E1',
-              status: 'available' as const,
-              attachedToTableId: table.id,
-              attachedAngleDeg: angleDeg
-            });
+            // Postoje separe-i: rasporedi stolice SAMO po slobodnim lukovima,
+            // ravnomerno po ukupnoj slobodnoj dužini (isti algoritam kao u AddSeatsModal preview-u).
+            for (let idx = 0; idx < m; idx++) {
+              const i = seatIndices[idx];
+              const variant = perSeatVariants[i];
+              const target = ((idx + 1) / (m + 1)) * totalFreeAngle;
+              let remaining = target;
+              let angleAbs = 0;
+              for (const arc of freeArcs) {
+                const len = arc.end - arc.start;
+                if (remaining <= len) {
+                  angleAbs = arc.start + remaining;
+                  break;
+                }
+                remaining -= len;
+              }
+              const finalAngle = normalizeAngle(angleAbs);
+              const a = finalAngle * Math.PI / 180;
+
+              const baseSize = getDefaultAutoChairSize(variant as any, 'horizontal');
+              const szOverride = perSeatSizes && perSeatSizes[i] ? perSeatSizes[i] : undefined;
+              const size = { w: baseSize.w, h: baseSize.h };
+              if (szOverride?.w != null) {
+                size.w = Math.max(4, szOverride.w);
+              } else if (chairWidthOverride != null) {
+                size.w = chairWidthOverride;
+              }
+              if (szOverride?.h != null) {
+                size.h = Math.max(4, szOverride.h);
+              } else if (chairHeightOverride != null) {
+                size.h = chairHeightOverride;
+              }
+              const inset = getChairVariantInsetPx(variant, size.w, size.h);
+              const half = Math.min(size.w, size.h) / 2;
+              const offset = Math.max(0, half - inset) + CHAIR_SNAP_GAP;
+              const centerX = cx + Math.cos(a) * (r + offset);
+              const centerY = cy + Math.sin(a) * (r + offset);
+              const rotationDeg = ((Math.atan2(Math.sin(a), Math.cos(a)) + Math.PI / 2) * 180 / Math.PI + 360) % 360;
+              toAdd.push({
+                id: `chair-${table.id}-${Date.now()}-${i}`,
+                number: 0,
+                name: '',
+                seats: 1,
+                x: clampX(centerX - size.w / 2, size.w),
+                y: clampY(centerY - size.h / 2, size.h),
+                width: size.w,
+                height: size.h,
+                type: 'chair' as const,
+                chairVariant: variant as any,
+                rotation: rotationDeg,
+                color: '#CBD5E1',
+                status: 'available' as const,
+                attachedToTableId: table.id,
+                attachedAngleDeg: finalAngle
+              });
+            }
           }
         }
       }
+      const withChairs = [...kept, ...toAdd];
+      // Ažuriraj broj mesta na parent kružnom stolu na osnovu attached stolica.
+      const totalSeats = withChairs
+        .filter((t: any) => t && t.type === 'chair' && t.attachedToTableId === table.id)
+        .reduce((sum: number, ch: any) => sum + (Number(ch.seats) || 0), 0);
+      const tablesWithSeatCount = withChairs.map((t: any) =>
+        t.id === table.id ? { ...t, seats: Math.max(0, totalSeats) } : t
+      );
       return {
         ...baseLayout,
-        tables: [...kept, ...toAdd]
+        tables: tablesWithSeatCount
       };
     }
     // Rectangle: compute positions per-side with optional spacing and per-seat size overrides
@@ -1588,8 +2423,11 @@ const Canvas: React.FC<CanvasProps> = ({
           const wall = RECT_U_WALL_PX;
           const sepW = w + wall * 2;
           const sepH = h + wall;
-          const rotDeg = table.rotation || 0;
-          const rotRad = rotDeg * Math.PI / 180;
+          // Orient U tako da je otvor uvek okrenut ka stolu:
+          // - top: otvor na dole  (0° + rotacija stola)
+          // - bottom: otvor na gore (180° + rotacija stola)
+          const rotDeg = normalizeAngle((side === 'top' ? 0 : 180) + (table.rotation || 0));
+          const rotRad = (table.rotation || 0) * Math.PI / 180;
           const cxWorld = cx;
           const cyWorld = cy;
           // Desired: inner bottom of U is flush with table top (Top) / inner top flush with table bottom (Bottom).
@@ -1636,6 +2474,48 @@ const Canvas: React.FC<CanvasProps> = ({
       } else {
         const length = 2 * halfH;
         const step = (length - spacingPx * Math.max(0, count - 1)) / (count + 1);
+        // Poseban slučaj za U separe na levoj/desnoj strani: kao na vrhu/dnu – jedan U koji obuhvata celu stranu.
+        // Pošto je U rotiran za 90°/270°, ovde koristimo visinu stola kao „dužinu stranice“, analogno širini za top/bottom.
+        if (variant === 'boothU' && table.type !== 'circle') {
+          const wall = RECT_U_WALL_PX;
+          // Arms along vertical side → koriste height stola
+          const sepW = h + wall * 2;
+          const sepH = w + wall;
+          const rotDeg = table.rotation || 0;
+          const rotRad = rotDeg * Math.PI / 180;
+          const cxWorld = cx;
+          const cyWorld = cy;
+          const sign = side === 'left' ? -1 : 1;
+          const localDx = sign * (wall / 2);
+          const localDy = 0;
+          const offX = localDx * Math.cos(rotRad) - localDy * Math.sin(rotRad);
+          const offY = localDx * Math.sin(rotRad) + localDy * Math.cos(rotRad);
+          const sepCenterX = cxWorld + offX;
+          const sepCenterY = cyWorld + offY;
+          const nxTopLeftX = sepCenterX - sepW / 2;
+          const nxTopLeftY = sepCenterY - sepH / 2;
+          const finalRot = normalizeAngle((side === 'left' ? 270 : 90) + (table.rotation || 0));
+          toAdd.push({
+            id: `chair-${table.id}-${Date.now()}-${side}-u`,
+            number: 0,
+            name: '',
+            seats: 1,
+            x: clampX(nxTopLeftX, sepW),
+            y: clampY(nxTopLeftY, sepH),
+            width: sepW,
+            height: sepH,
+            type: 'chair' as const,
+            chairVariant: variant as any,
+            rotation: finalRot,
+            color: '#CBD5E1',
+            status: 'available' as const,
+            attachedToTableId: table.id,
+            attachedSide: side,
+            attachedT: 0.5,
+            attachedOffsetPx: 0,
+            boothThickness: wall
+          });
+        } else {
         for (let i = 1; i <= count; i++) {
           const ly = -halfH + step * i + spacingPx * (i - 1);
           const lx = side === 'left' ? -halfW : +halfW;
@@ -1648,6 +2528,7 @@ const Canvas: React.FC<CanvasProps> = ({
             sz = { w: outer, h: outer };
           }
           pushChair(lx, ly, nx, ny, variant, 'vertical', side, tNorm, `${side}-${i}`, sz);
+          }
         }
       }
     });
@@ -1826,30 +2707,98 @@ const Canvas: React.FC<CanvasProps> = ({
   // Mirror clipboard in a ref to avoid any stale state edge cases across events/renders
   const clipboardRef = useRef<any[]>([]);
 
-  // Global next auto table number (1..999) across ALL zones, allows duplicates and never resequences
-  const [nextAutoTableNumber, setNextAutoTableNumber] = useState<number>(1);
-  useEffect(() => {
-    // Compute max table number across current working layout and all default zone layouts
-    const allTablesAcrossZones = [
-      ...(layout.tables || []),
-      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
-    ];
-    const maxNumber = allTablesAcrossZones
-      .map(t => (typeof t.number === 'number' && isFinite(t.number) ? t.number : 0))
-      .reduce((m, n) => Math.max(m, n), 0);
-    const computedNext = Math.min(999, Math.max(1, maxNumber + 1));
-    // Only increase, never decrease, to respect manual overrides done earlier in the session
-    setNextAutoTableNumber(prev => (computedNext > prev ? computedNext : prev));
-  }, [layout.tables, zoneLayouts]);
-
   // Hover state
   const [hoveredTable, setHoveredTable] = useState<{ tableId: string, reservation: Reservation, position: { x: number, y: number } } | null>(null);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const hoverRafRef = useRef<number | null>(null);
   const [isWaiterDragActive, setIsWaiterDragActive] = useState(false);
+  const [tooltipTick, setTooltipTick] = useState(0);
+
+  // Keep tooltip countdown text fresh while tooltip is visible
+  useEffect(() => {
+    if (!hoveredTable) return;
+    const id = window.setInterval(() => setTooltipTick(t => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [hoveredTable?.tableId, hoveredTable?.reservation?.id]);
+
+  const formatRemaining = useCallback((diffMs: number) => {
+    try {
+      const safe = Math.max(0, Math.floor(diffMs));
+      const totalSeconds = Math.floor(safe / 1000);
+      const totalMinutes = Math.floor(totalSeconds / 60);
+      const totalHours = Math.floor(totalMinutes / 60);
+      const days = Math.floor(totalHours / 24);
+      if (days > 0) return `${days}d`;
+      if (totalHours > 0) return `${totalHours}h`;
+      if (totalMinutes > 0) return `${totalMinutes}m`;
+      return `${Math.max(0, totalSeconds)}s`;
+    } catch {
+      return '0s';
+    }
+  }, []);
+
+  const getWaitingRemaining = useCallback((reservation: Reservation) => {
+    try {
+      // tooltipTick forces re-render each second while hovered
+      void tooltipTick;
+      const isSpill = Boolean((reservation as any).__spilloverFromPrevDay);
+      const srcDate = isSpill ? String((reservation as any).__spilloverSourceDate || reservation.date) : reservation.date;
+      const srcTime = isSpill ? String((reservation as any).__spilloverSourceTime || reservation.time) : reservation.time;
+      const target = new Date(`${srcDate}T${srcTime}`);
+      const now = new Date();
+      return formatRemaining(target.getTime() - now.getTime());
+    } catch {
+      return '0s';
+    }
+  }, [formatRemaining, tooltipTick]);
+
+  const getSeatedRemaining = useCallback((reservation: Reservation, tableId?: string) => {
+    try {
+      void tooltipTick;
+      const isSpill = Boolean((reservation as any).__spilloverFromPrevDay);
+      const srcDate = isSpill ? String((reservation as any).__spilloverSourceDate || reservation.date) : reservation.date;
+      const srcTime = isSpill ? String((reservation as any).__spilloverSourceTime || reservation.time) : reservation.time;
+      const start = new Date(`${srcDate}T${srcTime}`);
+      // default end by estimated duration
+      let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
+
+      // override from local adjustments if present
+      try {
+        const key = `respoint-duration-adjustments:${srcDate}`;
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const adj = parsed?.[reservation.id];
+        if (adj && typeof adj.end === 'number') {
+          const midnight = new Date(`${srcDate}T00:00:00`);
+          end = new Date(midnight.getTime() + Math.max(0, Math.min(2880, adj.end)) * 60 * 1000);
+        }
+      } catch {}
+
+      // apply table-specific limit if exists
+      if (tableId) {
+        try {
+          const key = `respoint-table-limits:${srcDate}`;
+          const raw = localStorage.getItem(key);
+          const parsed = raw ? JSON.parse(raw) : {};
+          const limitMin = parsed?.[tableId];
+          if (typeof limitMin === 'number') {
+            const midnight = new Date(`${srcDate}T00:00:00`);
+            const limitEnd = new Date(midnight.getTime() + Math.max(0, Math.min(2880, limitMin)) * 60 * 1000);
+            if (limitEnd.getTime() < end.getTime()) end = limitEnd;
+          }
+        } catch {}
+      }
+
+      const now = new Date();
+      return formatRemaining(end.getTime() - now.getTime());
+    } catch {
+      return '0s';
+    }
+  }, [formatRemaining, tooltipTick]);
 
   // Grid settings
   const GRID_SIZE = 10;
+  const CANVAS_OFFSET_STEP = GRID_SIZE; // how many pixels to move layout per arrow click
   // Recommended/standard table size:
   // - rectangle: 5x5 grid cells
   // - circle:    8x8 grid cells
@@ -1862,6 +2811,18 @@ const Canvas: React.FC<CanvasProps> = ({
   const BOOTH_ARC_THICKNESS_U = GRID_SIZE * 4;
   // Fixed wall thickness (px) for U-shaped separé around rectangular tables
   const RECT_U_WALL_PX = 30;
+
+  // Helpers to move/reset the visual canvas offset (does not change saved layout coordinates)
+  const nudgeCanvas = (dx: number, dy: number) => {
+    setCanvasOffset(prev => ({
+      x: prev.x + dx,
+      y: prev.y + dy
+    }));
+  };
+
+  const resetCanvasOffset = () => {
+    setCanvasOffset({ x: 0, y: 0 });
+  };
   // Fraction of bounding-box width that forms the inner opening of our U-booth SVG (approx 32%)
   const U_BOOTH_INNER_WIDTH_FRACTION = 32 / 100;
 
@@ -1950,8 +2911,25 @@ const Canvas: React.FC<CanvasProps> = ({
       layout.tables?.some(t => t.id === id)
     );
 
-    // Delete
-    const remainingTables = layout.tables.filter(table => !elementsToDelete.includes(table.id));
+    // Delete tables and any chairs attached to deleted tables
+    const deletedParentTableIds = new Set(
+      layout.tables
+        .filter(t => t && t.type !== 'chair' && elementsToDelete.includes(t.id))
+        .map(t => t.id)
+    );
+    const remainingTables = layout.tables.filter(table => {
+      // Always remove explicitly deleted elements
+      if (elementsToDelete.includes(table.id)) return false;
+      // Additionally remove chairs that are attached to any deleted parent table
+      if (
+        table.type === 'chair' &&
+        (table as any).attachedToTableId &&
+        deletedParentTableIds.has((table as any).attachedToTableId)
+      ) {
+        return false;
+      }
+      return true;
+    });
     const wallsLeft = layout.walls.filter(wall => !elementsToDelete.includes(wall.id));
     const textsLeft = layout.texts.filter(text => !elementsToDelete.includes(text.id));
     
@@ -2101,11 +3079,13 @@ const Canvas: React.FC<CanvasProps> = ({
       pasteX = atCursor.x - centerX;
       pasteY = atCursor.y - centerY;
     } else if (canvasRef.current) {
-      // Center the pasted content in the canvas viewport
+      // Center the pasted content in the visible canvas viewport (world coordinates)
       const rect = canvasRef.current.getBoundingClientRect();
       const midClientX = rect.left + rect.width / 2;
       const midClientY = rect.top + rect.height / 2;
-      const { x: canvasCenterX, y: canvasCenterY } = getZoomAdjustedCoordinates(midClientX, midClientY, rect);
+      const { x: localCenterX, y: localCenterY } = getZoomAdjustedCoordinates(midClientX, midClientY, rect);
+      const canvasCenterX = localCenterX - canvasOffset.x;
+      const canvasCenterY = localCenterY - canvasOffset.y;
       pasteX = canvasCenterX - centerX;
       pasteY = canvasCenterY - centerY;
     }
@@ -2240,12 +3220,6 @@ const Canvas: React.FC<CanvasProps> = ({
       walls: [...layout.walls, ...newWalls],
       texts: [...layout.texts, ...newTexts]
     });
-    
-    // Update global next auto number to pasted max + 1 (Option A for paste/duplicate)
-    if (newTables.length > 0) {
-      // Update helper state to next currently free number
-      setNextAutoTableNumber(getNextFreeFromSet());
-    }
     
     // Select the pasted elements
     setSelectedElements(newElements);
@@ -2479,9 +3453,14 @@ const Canvas: React.FC<CanvasProps> = ({
   const getGlobalNextTableNumber = useCallback((): number => {
     // Vrati PRVI slobodan broj (1..999) preko svih zona (ignoriši stolice)
     const used = new Set<number>();
+    const fromZoneLayouts = Object.values(zoneLayouts || {}).flatMap(l => l?.tables || []);
+    const fromSavedLayouts = Object.values(savedLayouts || {}).flatMap((list: any) =>
+      (list || []).flatMap((sl: any) => (sl?.layout?.tables || []))
+    );
     const allTablesAcrossZones = [
       ...(layout.tables || []),
-      ...Object.values(zoneLayouts || {}).flatMap(l => l?.tables || [])
+      ...fromZoneLayouts,
+      ...fromSavedLayouts,
     ];
     allTablesAcrossZones.forEach(t => {
       if (t && t.type !== 'chair' && typeof t.number === 'number' && isFinite(t.number)) {
@@ -2492,7 +3471,7 @@ const Canvas: React.FC<CanvasProps> = ({
       if (!used.has(i)) return i;
     }
     return 999;
-  }, [layout.tables, zoneLayouts]);
+  }, [layout.tables, zoneLayouts, savedLayouts]);
 
   // Force re-render when waiter assignment changes externally
   const [, forceWaiterRefresh] = useState(0);
@@ -2575,7 +3554,9 @@ const Canvas: React.FC<CanvasProps> = ({
     }
 
     const rect = canvasRef.current!.getBoundingClientRect();
-    const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const x = localX - canvasOffset.x;
+    const y = localY - canvasOffset.y;
     const gridX = snapToGrid(clampX(x));
     const gridY = snapToGrid(clampY(y));
 
@@ -2644,7 +3625,9 @@ const Canvas: React.FC<CanvasProps> = ({
   // Handle mouse move
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const x = localX - canvasOffset.x;
+    const y = localY - canvasOffset.y;
     const gridX = snapToGrid(clampX(x));
     const gridY = snapToGrid(clampY(y));
 
@@ -2896,6 +3879,39 @@ const Canvas: React.FC<CanvasProps> = ({
             if (initial) {
               // Skip chairs entirely; they will be glued to their parent after scaling
               if ((table as any).type === 'chair') return table;
+              
+              // Use stored rotation from initial state (not current table rotation which might be stale)
+              const initialRotation = initial.rotation || 0;
+              const tableRotation = normalizeAngle(initialRotation - (groupRotation || 0));
+              const theta = tableRotation * Math.PI / 180;
+              const absScaleX = Math.abs(scaleX);
+              const absScaleY = Math.abs(scaleY);
+              
+              // Illustrator-like: apply world scales projected to element's local axes.
+              const sLocalX = Math.sqrt((absScaleX * Math.cos(theta)) ** 2 + (absScaleY * Math.sin(theta)) ** 2);
+              const sLocalY = Math.sqrt((absScaleX * Math.sin(theta)) ** 2 + (absScaleY * Math.cos(theta)) ** 2);
+              
+              // For circular tables, use uniform scaling for both dimensions AND position
+              const isCircle = initial.type === 'circle' || table.type === 'circle';
+              let effectiveScaleX = scaleX;
+              let effectiveScaleY = scaleY;
+              let newWidth: number;
+              let newHeight: number;
+              
+              if (isCircle) {
+                // Use uniform scale for circles to prevent distortion
+                const sUniform = Math.max(sLocalX, sLocalY);
+                newWidth = initial.width * sUniform;
+                newHeight = initial.height * sUniform;
+                // Also use uniform scale for position calculation
+                const uniformAbsScale = Math.max(absScaleX, absScaleY);
+                effectiveScaleX = Math.sign(scaleX) * uniformAbsScale;
+                effectiveScaleY = Math.sign(scaleY) * uniformAbsScale;
+              } else {
+                newWidth = initial.width * sLocalX;
+                newHeight = initial.height * sLocalY;
+              }
+              
               // Calculate original center point
               const originalCenterX = initial.x + initial.width / 2;
               const originalCenterY = initial.y + initial.height / 2;
@@ -2908,9 +3924,9 @@ const Canvas: React.FC<CanvasProps> = ({
               const localOffsetX = relativeOffsetX * cos + relativeOffsetY * sin;
               const localOffsetY = -relativeOffsetX * sin + relativeOffsetY * cos;
               
-              // Apply scaling in local coordinate system
-              const scaledLocalOffsetX = localOffsetX * scaleX;
-              const scaledLocalOffsetY = localOffsetY * scaleY;
+              // Apply scaling in local coordinate system (use effective scale for circles)
+              const scaledLocalOffsetX = localOffsetX * effectiveScaleX;
+              const scaledLocalOffsetY = localOffsetY * effectiveScaleY;
               
               // Transform back to global coordinates
               const scaledGlobalOffsetX = scaledLocalOffsetX * cos - scaledLocalOffsetY * sin;
@@ -2920,38 +3936,17 @@ const Canvas: React.FC<CanvasProps> = ({
               const newCenterX = globalAnchorX + scaledGlobalOffsetX;
               const newCenterY = globalAnchorY + scaledGlobalOffsetY;
               
-              // Scale dimensions
-              let newWidth: number;
-              let newHeight: number;
-              
-              const tableRotation = normalizeAngle((table.rotation || 0) - (groupRotation || 0));
-              const theta = tableRotation * Math.PI / 180;
-              const absScaleX = Math.abs(scaleX);
-              const absScaleY = Math.abs(scaleY);
-              // Illustrator-like: apply world scales projected to element's local axes.
-              // This works for all element types (tables, chairs, walls, text).
-                const sLocalX = Math.sqrt((absScaleX * Math.cos(theta)) ** 2 + (absScaleY * Math.sin(theta)) ** 2);
-                const sLocalY = Math.sqrt((absScaleX * Math.sin(theta)) ** 2 + (absScaleY * Math.cos(theta)) ** 2);
-              newWidth = initial.width * sLocalX;
-              newHeight = initial.height * sLocalY;
-              // Enforce uniform scaling for circular tables to prevent distortion
-              if (table.type === 'circle') {
-                const sUniform = Math.max(sLocalX, sLocalY);
-                newWidth = initial.width * sUniform;
-                newHeight = initial.height * sUniform;
-              }
-              
               // Convert back to top-left position
               const newX = newCenterX - newWidth / 2;
               const newY = newCenterY - newHeight / 2;
         
-      return {
-        ...table,
-        x: newX,
-        y: newY,
-        width: Math.max(30, newWidth),
-        height: Math.max(30, newHeight),
-      };
+              return {
+                ...table,
+                x: newX,
+                y: newY,
+                width: Math.max(30, newWidth),
+                height: Math.max(30, newHeight),
+              };
             }
           }
           return table;
@@ -3024,6 +4019,18 @@ const Canvas: React.FC<CanvasProps> = ({
           if (selectedElements.includes(text.id)) {
             const initial = groupScaleInitialStates.current[text.id];
             if (initial) {
+              // Determine uniform scale factor for text (preserve aspect ratio)
+              // Text uses uniform scaling, so use the same factor for position
+              let uniformScale: number;
+              if (['l', 'r'].includes(groupScaleHandle)) {
+                uniformScale = Math.abs(scaleX);
+              } else if (['t', 'b'].includes(groupScaleHandle)) {
+                uniformScale = Math.abs(scaleY);
+              } else {
+                // Corner handles: use larger factor for intuitive scaling
+                uniformScale = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+              }
+              
               // Calculate original center point
               const originalCenterX = initial.x + initial.width / 2;
               const originalCenterY = initial.y + initial.height / 2;
@@ -3036,9 +4043,11 @@ const Canvas: React.FC<CanvasProps> = ({
               const localOffsetX = relativeOffsetX * cos + relativeOffsetY * sin;
               const localOffsetY = -relativeOffsetX * sin + relativeOffsetY * cos;
               
-              // Apply scaling in local coordinate system
-              const scaledLocalOffsetX = localOffsetX * scaleX;
-              const scaledLocalOffsetY = localOffsetY * scaleY;
+              // For text, use uniform scaling for position (like circular tables)
+              // This keeps text proportionally positioned relative to anchor
+              const effectiveScale = Math.sign(scaleX) * uniformScale;
+              const scaledLocalOffsetX = localOffsetX * effectiveScale;
+              const scaledLocalOffsetY = localOffsetY * effectiveScale;
               
               // Transform back to global coordinates
               const scaledGlobalOffsetX = scaledLocalOffsetX * cos - scaledLocalOffsetY * sin;
@@ -3048,16 +4057,6 @@ const Canvas: React.FC<CanvasProps> = ({
               const newCenterX = globalAnchorX + scaledGlobalOffsetX;
               const newCenterY = globalAnchorY + scaledGlobalOffsetY;
 
-              // Determine uniform scale factor for text (preserve aspect ratio)
-              let uniformScale: number;
-              if (['l', 'r'].includes(groupScaleHandle)) {
-                uniformScale = Math.abs(scaleX);
-              } else if (['t', 'b'].includes(groupScaleHandle)) {
-                uniformScale = Math.abs(scaleY);
-              } else {
-                // Corner handles: use larger factor for intuitive scaling
-                uniformScale = Math.max(Math.abs(scaleX), Math.abs(scaleY));
-              }
               const baseFont = initial.fontSize ?? (text.fontSize || 16);
               const newFontSize = Math.max(1, baseFont * uniformScale);
 
@@ -4230,7 +5229,9 @@ const Canvas: React.FC<CanvasProps> = ({
       setIsDrawing(false);
 
       const rect = canvasRef.current!.getBoundingClientRect();
-      const { x: endRawX, y: endRawY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const { x: localEndX, y: localEndY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const endRawX = localEndX - canvasOffset.x;
+      const endRawY = localEndY - canvasOffset.y;
       const endX = snapToGrid(clampX(endRawX));
       const endY = snapToGrid(clampY(endRawY));
 
@@ -4267,9 +5268,7 @@ const Canvas: React.FC<CanvasProps> = ({
             ...layout,
             tables: [...(layout.tables || []), newTable]
           });
-          // Advance global next auto number
-          setNextAutoTableNumber(Math.min(999, nextNumber + 1));
-          
+
           // Clear interaction layout to ensure undo/redo works properly
           setInteractionLayout(null);
         }
@@ -4494,7 +5493,9 @@ const Canvas: React.FC<CanvasProps> = ({
     if (!isEditing || selectedTool !== 'select') return;
     
     const rect = canvasRef.current!.getBoundingClientRect();
-    const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const x = localX - canvasOffset.x;
+    const y = localY - canvasOffset.y;
     
     // Check if clicking on an element
     const clickedElement = getElementAtPosition(x, y);
@@ -4666,7 +5667,9 @@ const Canvas: React.FC<CanvasProps> = ({
       copySelectedElements(contextMenuSelection.length > 0 ? contextMenuSelection : selectedElements);
     } else if (action === 'paste') {
       const rect = canvasRef.current!.getBoundingClientRect();
-      const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(contextMenuPosition.x, contextMenuPosition.y, rect);
+      const { x: localX, y: localY } = getZoomAdjustedCoordinates(contextMenuPosition.x, contextMenuPosition.y, rect);
+      const canvasX = localX - canvasOffset.x;
+      const canvasY = localY - canvasOffset.y;
       pasteElements({ x: snapToGrid(canvasX), y: snapToGrid(canvasY) });
     } else if (action === 'add_seats') {
       if (contextMenuTargetTableId) {
@@ -4766,23 +5769,6 @@ const Canvas: React.FC<CanvasProps> = ({
       
       setLayout({ ...layout, tables: updatedCurrentTables });
       
-      // Update helper next number to first currently free
-      // Build used numbers set
-      const used = new Set<number>();
-      const allTablesAcrossZones = [
-        ...updatedCurrentTables,
-        ...Object.values(zoneLayouts || {}).flatMap((l: any) => l?.tables || [])
-      ];
-      allTablesAcrossZones.forEach((t: any) => {
-        if (t && t.type !== 'chair' && typeof t.number === 'number' && isFinite(t.number)) {
-          used.add(t.number);
-        }
-      });
-      let nextFree = 1;
-      for (let i = 1; i <= 999; i++) {
-        if (!used.has(i)) { nextFree = i; break; }
-      }
-      setNextAutoTableNumber(nextFree);
       setNumberConflict(null);
       return;
     }
@@ -5054,9 +6040,11 @@ const Canvas: React.FC<CanvasProps> = ({
     const visualSelectionToRestore = (elementId && !currentSelection.includes(elementId)) ? [elementId] : currentSelection;
     setSelectedElementsBeforeDrag(visualSelectionToRestore);
     
-    // Get mouse position
+    // Get mouse position in world coordinates
     const rect = canvasRef.current!.getBoundingClientRect();
-    const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+    const canvasX = localX - canvasOffset.x;
+    const canvasY = localY - canvasOffset.y;
     
     // Allow dragging for both single element and group selections
     const canStartDragging = elementId ? 
@@ -5137,14 +6125,18 @@ const Canvas: React.FC<CanvasProps> = ({
     
     if (element) {
       const rect = canvasRef.current!.getBoundingClientRect();
-      const { x: mouseCanvasX, y: mouseCanvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const mouseCanvasX = localX - canvasOffset.x;
+      const mouseCanvasY = localY - canvasOffset.y;
       const centerX = element.x + (element.width || 100) / 2;
       const centerY = element.y + (element.height || 100) / 2;
       const startAngle = calculateAngle(centerX, centerY, mouseCanvasX, mouseCanvasY);
       setRotationStart(startAngle);
     } else if (wall) {
       const rect = canvasRef.current!.getBoundingClientRect();
-      const { x: mouseCanvasX, y: mouseCanvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const mouseCanvasX = localX - canvasOffset.x;
+      const mouseCanvasY = localY - canvasOffset.y;
       const centerX = (wall.x1 + wall.x2) / 2;
       const centerY = (wall.y1 + wall.y2) / 2;
       const startAngle = calculateAngle(centerX, centerY, mouseCanvasX, mouseCanvasY);
@@ -5294,11 +6286,26 @@ const Canvas: React.FC<CanvasProps> = ({
       const text = layoutForInit.texts?.find(t => t.id === id);
       
       if (table) {
-        groupScaleInitialStates.current[id] = { x: table.x, y: table.y, width: table.width || 100, height: table.height || 100 };
+        groupScaleInitialStates.current[id] = { 
+          x: table.x, 
+          y: table.y, 
+          width: table.width || 100, 
+          height: table.height || 100,
+          rotation: table.rotation || 0,
+          type: table.type || 'rectangle'
+        };
       } else if (text) {
         // Use measured size and store initial font size for proper scaling
         const measured = getTextSize(text.text, text.fontSize || 16);
-        groupScaleInitialStates.current[id] = { x: text.x, y: text.y, width: measured.width, height: measured.height, fontSize: text.fontSize || 16 };
+        groupScaleInitialStates.current[id] = { 
+          x: text.x, 
+          y: text.y, 
+          width: measured.width, 
+          height: measured.height, 
+          fontSize: text.fontSize || 16,
+          rotation: text.rotation || 0,
+          type: 'text'
+        };
       }
       // Note: walls use x1,y1,x2,y2,thickness so they'll be handled through originalElementStates
     });
@@ -5413,7 +6420,9 @@ const Canvas: React.FC<CanvasProps> = ({
     // Calculate starting angle using new helper function
     if (groupBounds) {
       const rect = canvasRef.current!.getBoundingClientRect();
-      const { x: mouseCanvasX, y: mouseCanvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+      const mouseCanvasX = localX - canvasOffset.x;
+      const mouseCanvasY = localY - canvasOffset.y;
       const startAngle = calculateAngle(
         groupBounds.centerX, 
         groupBounds.centerY, 
@@ -5534,558 +6543,229 @@ const Canvas: React.FC<CanvasProps> = ({
     setTableNameInput('');
   };
 
-  // Lightweight inline countdown for time left until reservation time
-  const InlineCountdown: React.FC<{ reservationDate: string; reservationTime: string; }> = ({ reservationDate, reservationTime }) => {
-    const [timeLeft, setTimeLeft] = useState('');
+  // Helper: robust check if reservation's table_ids contain this table (by id, name or number).
+  // Uses a fallback through all zone layouts so multi-zone reservations are matched reliably.
+  const doesReservationIncludeTable = useCallback(
+    (rawIds: any[] | undefined | null, tbl: any): boolean => {
+      const normalize = (v: any) => String(v ?? '').trim().toLowerCase();
+      const ids = (rawIds || []).map((x: any) => normalize(x));
+      if (ids.length === 0) return false;
 
-    useEffect(() => {
-      let interval: NodeJS.Timeout | undefined;
+      const tableId = normalize(tbl.id);
+      const tableName = tbl.name != null ? normalize(tbl.name) : '';
+      const tableNumberStr =
+        typeof tbl.number !== "undefined" && tbl.number !== null
+          ? normalize(String(tbl.number))
+          : "";
 
-      const update = () => {
-        try {
-          const reservationDateTime = new Date(`${reservationDate}T${reservationTime}`);
-          const now = new Date();
-          const diffMs = reservationDateTime.getTime() - now.getTime();
-          if (diffMs > 0) {
-            const totalMinutes = Math.floor(diffMs / (1000 * 60));
-            const totalHours = Math.floor(totalMinutes / 60);
-            const days = Math.floor(totalHours / 24);
-            const hours = totalHours % 24;
-            const minutes = totalMinutes % 60;
-            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-
-            // Single-unit compact display to avoid wrapping
-            if (days > 0) setTimeLeft(`${days}d`);
-            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
-            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
-            else setTimeLeft(`${seconds}s`);
-          } else {
-            // Keep showing 0s when expired
-            setTimeLeft('0s');
-            if (interval) clearInterval(interval);
-          }
-        } catch {
-          setTimeLeft('');
-        }
-      };
-
-      update();
-      interval = setInterval(update, 1000);
-      return () => { if (interval) clearInterval(interval); };
-    }, [reservationDate, reservationTime]);
-
-    if (!timeLeft) return null;
-    return <span>{timeLeft}</span>;
-  };
-
-  // Countdown badge: renders the label and applies pulse on expiry
-  const CountdownBadge: React.FC<{ reservationDate: string; reservationTime: string; color: string; }> = ({ reservationDate, reservationTime, color }) => {
-    const [timeLeft, setTimeLeft] = useState('');
-    const [expired, setExpired] = useState(false);
-
-    useEffect(() => {
-      let interval: NodeJS.Timeout | undefined;
-      const update = () => {
-        try {
-          const target = new Date(`${reservationDate}T${reservationTime}`);
-          const now = new Date();
-          const diffMs = target.getTime() - now.getTime();
-          if (diffMs > 0) {
-            const totalMinutes = Math.floor(diffMs / (1000 * 60));
-            const totalHours = Math.floor(totalMinutes / 60);
-            const days = Math.floor(totalHours / 24);
-            const hours = totalHours % 24;
-            const minutes = totalMinutes % 60;
-            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-            setExpired(false);
-            if (days > 0) setTimeLeft(`${days}d`);
-            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
-            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
-            else setTimeLeft(`${seconds}s`);
-          } else {
-            setExpired(true);
-            setTimeLeft('0s');
-            if (interval) clearInterval(interval);
-          }
-        } catch {
-          setExpired(false);
-          setTimeLeft('');
-        }
-      };
-      update();
-      interval = setInterval(update, 1000);
-      return () => { if (interval) clearInterval(interval); };
-    }, [reservationDate, reservationTime]);
-
-    if (!timeLeft) return null;
-    return (
-      <div
-        className={`rounded px-1.5 py-0.5 text-[10px] leading-none shadow ${expired ? 'respoint-glow-pulse-soft' : ''}`}
-        style={{
-          backgroundColor: color,
-          color: '#FFFFFF',
-          border: `1px solid ${color}`,
-          boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
-          ['--rp-glow-color' as any]: color
-        }}
-      >
-        {timeLeft}
-      </div>
-    );
-  };
-
-  // Helpers for seated reservations (ARRIVED) - countdown to estimated end
-  const estimateSeatedDurationMinutes = (numGuests?: number) => {
-    const g = typeof numGuests === 'number' ? numGuests : 2;
-    if (g <= 2) return 60;
-    if (g <= 4) return 120;
-    return 150;
-  };
-
-  const SeatedCountdownBadge: React.FC<{ reservation: Reservation; color: string; }> = ({ reservation, color }) => {
-    const [timeLeft, setTimeLeft] = useState('');
-    const [expired, setExpired] = useState(false);
-
-    useEffect(() => {
-      let interval: NodeJS.Timeout | undefined;
-      const update = () => {
-        try {
-          const start = new Date(`${reservation.date}T${reservation.time}`);
-          // default end by estimated duration
-          let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
-          // override from local adjustments if present
-          try {
-            const key = `respoint-duration-adjustments:${reservation.date}`;
-            const raw = localStorage.getItem(key);
-            const parsed = raw ? JSON.parse(raw) : {};
-            const adj = parsed?.[reservation.id];
-            if (adj && typeof adj.end === 'number') {
-              const midnight = new Date(`${reservation.date}T00:00:00`);
-              end = new Date(midnight.getTime() + Math.max(0, Math.min(1440, adj.end)) * 60 * 1000);
-            }
-          } catch {}
-          const now = new Date();
-          const diff = end.getTime() - now.getTime();
-          if (diff > 0) {
-            setExpired(false);
-            const totalMinutes = Math.floor(diff / (1000 * 60));
-            const totalHours = Math.floor(totalMinutes / 60);
-            const days = Math.floor(totalHours / 24);
-            const hours = totalHours % 24;
-            const minutes = totalMinutes % 60;
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-            if (days > 0) setTimeLeft(`${days}d`);
-            else if (totalHours > 0) setTimeLeft(`${totalHours}h`);
-            else if (totalMinutes > 0) setTimeLeft(`${minutes}m`);
-            else setTimeLeft(`${seconds}s`);
-          } else {
-            setExpired(true);
-            setTimeLeft('0s');
-            if (interval) clearInterval(interval);
-          }
-        } catch {
-          setExpired(false);
-          setTimeLeft('');
-        }
-      };
-      update();
-      interval = setInterval(update, 1000);
-      return () => { if (interval) clearInterval(interval); };
-    }, [reservation.date, reservation.time, reservation.id, reservation.numberOfGuests]);
-
-    if (!timeLeft) return null;
-    return (
-      <div
-        className={`rounded px-1.5 py-0.5 text-[10px] leading-none shadow ${expired ? 'respoint-glow-pulse-soft' : ''}`}
-        style={{
-          backgroundColor: color,
-          color: '#FFFFFF',
-          border: `1px solid ${color}`,
-          boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
-          ['--rp-glow-color' as any]: color
-        }}
-      >
-        {/* Chair icon + time */}
-        <span className="inline-flex items-center gap-1">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M7 3a2 2 0 0 0-2 2v7h2V5h10v7h2V5a2 2 0 0 0-2-2H7z"></path>
-            <path d="M6 14v5h2v-3h8v3h2v-5H6z"></path>
-          </svg>
-          {timeLeft}
-        </span>
-      </div>
-    );
-  };
-
-  // Inner progress stroke (inside table) for seated reservations
-  const SeatedProgressStroke: React.FC<{
-    shape: 'rect' | 'circle';
-    tableWidth: number;
-    tableHeight: number;
-    rotation: number;
-    color: string;
-    reservation: Reservation;
-    gap?: number;
-    strokeWidth?: number;
-    borderRadiusPx?: number;
-  }> = ({ shape, tableWidth, tableHeight, rotation, color, reservation, gap = 4, strokeWidth = 3, borderRadiusPx = 8 }) => {
-    const [progress, setProgress] = useState(0);
-    useEffect(() => {
-      let interval: NodeJS.Timeout | undefined;
-      const update = () => {
-        try {
-          const start = new Date(`${reservation.date}T${reservation.time}`);
-          let end: Date = new Date(start.getTime() + estimateSeatedDurationMinutes(reservation.numberOfGuests) * 60 * 1000);
-          try {
-            const key = `respoint-duration-adjustments:${reservation.date}`;
-            const raw = localStorage.getItem(key);
-            const parsed = raw ? JSON.parse(raw) : {};
-            const adj = parsed?.[reservation.id];
-            if (adj && typeof adj.end === 'number') {
-              const midnight = new Date(`${reservation.date}T00:00:00`);
-              end = new Date(midnight.getTime() + Math.max(0, Math.min(1440, adj.end)) * 60 * 1000);
-            }
-          } catch {}
-          const now = new Date();
-          const p = (now.getTime() - start.getTime()) / Math.max(1, (end.getTime() - start.getTime()));
-          setProgress(Math.max(0, Math.min(1, p)));
-        } catch {
-          setProgress(0);
-        }
-      };
-      update();
-      interval = setInterval(update, 1000);
-      return () => { if (interval) clearInterval(interval); };
-    }, [reservation.date, reservation.time, reservation.id, reservation.numberOfGuests]);
-
-    const isExpired = progress >= 1 - 1e-6;
-
-    // Build dashed strokeDasharray that covers only the visible progress length,
-    // then a single trailing gap to hide the remainder (no repetition).
-    const buildDashedArray = (visibleLen: number, totalLen: number, dashLen: number = 8, gapLen: number = 6) => {
-      let remaining = Math.max(0, Math.min(totalLen, visibleLen));
-      const parts: number[] = [];
-      let acc = 0;
-      while (remaining > 0.5) {
-        const d = Math.min(dashLen, remaining);
-        parts.push(d);
-        acc += d;
-        remaining -= d;
-        if (remaining <= 0.5) break;
-        const g = Math.min(gapLen, remaining);
-        parts.push(g);
-        acc += g;
-        remaining -= g;
+      // Exact string matches
+      if (
+        ids.includes(tableId) ||
+        (tableName && ids.includes(tableName)) ||
+        (tableNumberStr && ids.includes(tableNumberStr))
+      ) {
+        return true;
       }
-      const trailingGap = Math.max(0, totalLen - acc);
-      if (trailingGap > 0) parts.push(Math.max(trailingGap, totalLen * 2)); // oversize gap to prevent pattern repetition
-      return parts.join(' ');
-    };
 
-    if (shape === 'rect') {
-      // draw inside the table, respecting gap
-      const drawW = Math.max(0, tableWidth - strokeWidth - 2 * gap);
-      const drawH = Math.max(0, tableHeight - strokeWidth - 2 * gap);
-      const x = (tableWidth - drawW) / 2;
-      const y = (tableHeight - drawH) / 2;
-      const rEff = Math.min(Math.max(0, borderRadiusPx - gap), drawW / 2, drawH / 2);
-      const perimeter = 2 * (drawW + drawH);
-      const visibleLen = Math.max(0, Math.min(perimeter, progress * perimeter));
-      const dashArray = buildDashedArray(visibleLen, perimeter, 3, 5); // dashed progress (unused with mask, kept for reference)
-      const startX = x + drawW / 2;
-      const startY = y;
-      const d = [
-        `M ${startX} ${startY}`,
-        `H ${x + drawW - rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
-        `V ${y + drawH - rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
-        `H ${x + rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
-        `V ${y + rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
-        `H ${startX}`
-      ].join(' ');
-      const maskId = `seated-mask-${reservation.id}-rect`;
-      return (
-        <div className="absolute inset-0 pointer-events-none"
-             style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
-          <svg width={tableWidth} height={tableHeight}>
-            <defs>
-              <mask id={maskId}>
-                <path
-                  d={d}
-                  fill="none"
-                  stroke="white"
-                  strokeWidth={strokeWidth + 1}
-                  pathLength={perimeter as unknown as number}
-                  strokeDasharray={`${perimeter} ${perimeter}`}
-                  strokeDashoffset={Math.max(0, perimeter - visibleLen)}
-                  strokeLinecap="butt"
-                />
-              </mask>
-            </defs>
-            {/* Base dashed track */}
-            <path d={d} fill="none" stroke={color} strokeOpacity={0.25} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="butt" />
-            {/* Masked dashed progress */}
-            <path d={d} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="round" mask={`url(#${maskId})`} className={isExpired ? 'respoint-stroke-pulse' : undefined} />
-          </svg>
-        </div>
-      );
-    }
-    // circle
-    const rx = Math.max(2, tableWidth / 2 - gap - strokeWidth / 2);
-    const ry = Math.max(2, tableHeight / 2 - gap - strokeWidth / 2);
-    const cx = tableWidth / 2;
-    const cy = tableHeight / 2;
-    const circumference = 2 * Math.PI * Math.sqrt((rx * rx + ry * ry) / 2);
-    const visibleLen = Math.max(0, Math.min(circumference, progress * circumference));
-    const dashArray = buildDashedArray(visibleLen, circumference, 3, 5);
-    const maskIdCircle = `seated-mask-${reservation.id}-circle`;
-    return (
-      <div className="absolute inset-0 pointer-events-none"
-           style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
-        <svg width={tableWidth} height={tableHeight}>
-          <defs>
-            <mask id={maskIdCircle}>
-              <ellipse
-                cx={cx}
-                cy={cy}
-                rx={rx}
-                ry={ry}
-                fill="none"
-                stroke="white"
-                strokeWidth={strokeWidth + 1}
-                pathLength={circumference as unknown as number}
-                strokeDasharray={`${circumference} ${circumference}`}
-                strokeDashoffset={Math.max(0, circumference - visibleLen)}
-                transform={`rotate(-90 ${cx} ${cy})`}
-                strokeLinecap="butt"
-              />
-            </mask>
-          </defs>
-          {/* Base dashed track */}
-          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={color} strokeOpacity={0.25} strokeWidth={strokeWidth} strokeDasharray="3 5" transform={`rotate(-90 ${cx} ${cy})`} />
-          {/* Masked dashed progress */}
-          <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray="3 5" strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} mask={`url(#${maskIdCircle})`} className={isExpired ? 'respoint-stroke-pulse' : undefined} />
-        </svg>
-      </div>
-    );
-  };
-  // Outer progress stroke around table (outside with gap), filling as time approaches
-  const ProgressStroke: React.FC<{
-    shape: 'rect' | 'circle';
-    tableWidth: number;
-    tableHeight: number;
-    rotation: number;
-    color: string;
-    reservationDate: string;
-    reservationTime: string;
-    createdAt?: string;
-    gap?: number; // space between table edge and stroke
-    strokeWidth?: number;
-    windowMinutes?: number; // fallback window if createdAt missing
-    borderRadiusPx?: number; // for rect shape, match table rounding
-  }> = ({
-    shape,
-    tableWidth,
-    tableHeight,
-    rotation,
-    color,
-    reservationDate,
-    reservationTime,
-    createdAt,
-    gap = 4,
-    strokeWidth = 4,
-    windowMinutes = 60,
-    borderRadiusPx = 8
-  }) => {
-    const [progress, setProgress] = useState(0);
-
-    useEffect(() => {
-      let interval: NodeJS.Timeout | undefined;
-
-      const update = () => {
-        try {
-          const target = new Date(`${reservationDate}T${reservationTime}`);
-          const now = new Date();
-          if (isNaN(target.getTime())) { setProgress(0); return; }
-
-          // Determine start time: reservation createdAt if provided, otherwise fallback (windowMinutes before target)
-          const start = createdAt ? new Date(createdAt) : new Date(target.getTime() - windowMinutes * 60 * 1000);
-          const startMs = start.getTime();
-          const endMs = target.getTime();
-
-          if (!isFinite(startMs) || startMs >= endMs) {
-            // Fallback to last windowMinutes if createdAt invalid or after target
-            const fallbackStart = new Date(target.getTime() - windowMinutes * 60 * 1000);
-            const p =
-              now.getTime() <= fallbackStart.getTime() ? 0 :
-              now.getTime() >= endMs ? 1 :
-              (now.getTime() - fallbackStart.getTime()) / (endMs - fallbackStart.getTime());
-            setProgress(Math.max(0, Math.min(1, p)));
-            return;
+      // Numeric equivalence (handles cases like ' 1', '01', 'table 1')
+      const tblNum =
+        typeof tbl.number === "number" && isFinite(tbl.number) ? tbl.number : null;
+      if (tblNum !== null) {
+        for (const id of ids) {
+          const match = id.match(/\d+/);
+          if (match && parseInt(match[0], 10) === tblNum) {
+            return true;
           }
-
-          // Progress from creation time until arrival time
-          const p =
-            now.getTime() <= startMs ? 0 :
-            now.getTime() >= endMs ? 1 :
-            (now.getTime() - startMs) / (endMs - startMs);
-          setProgress(Math.max(0, Math.min(1, p)));
-        } catch {
-          setProgress(0);
         }
-      };
+      }
 
-      update();
-      interval = setInterval(update, 1000);
-      return () => { if (interval) clearInterval(interval); };
-    }, [reservationDate, reservationTime, createdAt, windowMinutes]);
+      // Fallback: map reservation IDs back to tables from zoneLayouts and compare numbers/names
+      try {
+        const allTables = Object.values(zoneLayouts || {}).flatMap(
+          (l: any) => l?.tables || []
+        );
+        if (allTables.length > 0) {
+          const byId: Record<string, any> = {};
+          for (const t of allTables) {
+            byId[normalize(t.id)] = t;
+          }
+          for (const id of ids) {
+            const t = byId[id];
+            if (t) {
+              const tName = t.name != null ? normalize(t.name) : "";
+              const tNumStr =
+                typeof t.number !== "undefined" && t.number !== null
+                  ? normalize(String(t.number))
+                  : "";
+              if (
+                (tName && tName === tableName) ||
+                (tNumStr && tNumStr === tableNumberStr)
+              ) {
+                return true;
+              }
+              // Also numeric equivalence between mapped table's number and current table's number
+              const mappedNum =
+                typeof t.number === "number" && isFinite(t.number)
+                  ? t.number
+                  : null;
+              if (mappedNum !== null && tblNum !== null && mappedNum === tblNum) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore mapping errors and fall through
+      }
 
-    const isExpired = progress >= 1 - 1e-6;
+      return false;
+    },
+    [zoneLayouts]
+  );
 
-    // Container grows to sit outside the table by gap + half stroke each side
-    const outerPad = gap + strokeWidth;
-    const containerW = tableWidth + outerPad * 2;
-    const containerH = tableHeight + outerPad * 2;
+  // Pre-compute which chair IDs are "occupied" for each ARRIVED (seated) reservation
+  // across ALL zones, so that multi-zone reservations don't over-count seats per zone.
+  const seatedChairIdsByReservation = useMemo(() => {
+    const map = new Map<string, Set<string>>();
 
-    // We rotate the whole overlay to align with the table orientation
-    // The inner SVG coordinates remain unrotated and we draw at (strokeWidth/2) margin.
+    try {
+      if (!selectedDate) return map;
 
-    if (shape === 'rect') {
-      const drawW = containerW - strokeWidth;
-      const drawH = containerH - strokeWidth;
-      // Effective corner radius applied on the ring (clamped to valid rect radius constraints)
-      const rEff = Math.min(Math.max(0, borderRadiusPx + gap), drawW / 2, drawH / 2);
-      // Build a path that starts at the middle of the top edge and goes clockwise
-      const x = strokeWidth / 2;
-      const y = strokeWidth / 2;
-      const startX = x + drawW / 2;
-      const startY = y;
-      const d = [
-        `M ${startX} ${startY}`,
-        `H ${x + drawW - rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + drawW} ${y + rEff}`,
-        `V ${y + drawH - rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + drawW - rEff} ${y + drawH}`,
-        `H ${x + rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x} ${y + drawH - rEff}`,
-        `V ${y + rEff}`,
-        `A ${rEff} ${rEff} 0 0 1 ${x + rEff} ${y}`,
-        `H ${startX}`
-      ].join(' ');
+      const year = selectedDate.getFullYear();
+      const month = (selectedDate.getMonth() + 1).toString().padStart(2, "0");
+      const day = selectedDate.getDate().toString().padStart(2, "0");
+      const dateKey = `${year}-${month}-${day}`;
 
-      return (
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            transform: `rotate(${rotation}deg)`,
-            transformOrigin: 'center',
-            left: -outerPad,
-            top: -outerPad,
-            width: containerW,
-            height: containerH
-          }}
-        >
-          <svg width={containerW} height={containerH}>
-            {/* Base track (always full ring) */}
-            <rect
-              x={strokeWidth / 2}
-              y={strokeWidth / 2}
-              width={drawW}
-              height={drawH}
-              rx={Math.max(0, borderRadiusPx + gap)}
-              ry={Math.max(0, borderRadiusPx + gap)}
-              fill="none"
-              stroke={color}
-              strokeOpacity={0.25}
-              strokeWidth={strokeWidth}
-              strokeLinecap="round"
-            />
-            <path
-              d={d}
-              fill="none"
-              stroke={color}
-              strokeWidth={strokeWidth}
-              pathLength={1 as any}
-              strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
-              strokeLinecap="round"
-              className={isExpired ? 'respoint-stroke-pulse' : undefined}
-            />
-          </svg>
-          {isExpired ? (
-            <div
-              className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
-              style={{
-                borderRadius: Math.max(0, (borderRadiusPx + gap + strokeWidth / 2)),
-                zIndex: 9998,
-                ['--rp-glow-color' as any]: color
-              }}
-            />
-          ) : null}
-        </div>
+      // Collect all tables (including chairs) from every zone layout
+      const allZoneTables: any[] = [];
+      Object.values(zoneLayouts || {}).forEach((layout: any) => {
+        const arr = Array.isArray(layout?.tables) ? layout.tables : [];
+        arr.forEach((t: any) => {
+          if (t) allZoneTables.push(t);
+        });
+      });
+      if (allZoneTables.length === 0) return map;
+
+      const todaysArrived = combinedReservations.filter(
+        (r) => r.status === "arrived" && r.date === dateKey
       );
+
+      for (const r of todaysArrived) {
+        const guests = Number((r as any).numberOfGuests) || 0;
+        if (guests <= 0) continue;
+
+        const rawIds: any[] = Array.isArray(r.tableIds) ? (r.tableIds as any[]) : [];
+        if (!rawIds.length) continue;
+
+        const parentTablesForRes = allZoneTables.filter(
+          (t: any) => t && t.type !== "chair" && doesReservationIncludeTable(rawIds, t)
+        );
+        if (!parentTablesForRes.length) continue;
+
+        const parentIds = parentTablesForRes.map((t: any) => String(t.id));
+        const parentIdSet = new Set(parentIds);
+
+        const chairsForRes = allZoneTables.filter(
+          (t: any) =>
+            t &&
+            t.type === "chair" &&
+            t.attachedToTableId &&
+            parentIdSet.has(String(t.attachedToTableId))
+        );
+        if (!chairsForRes.length) continue;
+
+        // Group chairs by their parent table
+        const chairsByParent: Record<string, any[]> = {};
+        chairsForRes.forEach((ch: any) => {
+          const pid = String(ch.attachedToTableId);
+          if (!chairsByParent[pid]) chairsByParent[pid] = [];
+          chairsByParent[pid].push(ch);
+        });
+
+        const parentIdsWithChairs = Object.keys(chairsByParent);
+        const totalChairs = parentIdsWithChairs.reduce(
+          (sum, pid) => sum + chairsByParent[pid].length,
+          0
+        );
+        if (totalChairs <= 0) continue;
+
+        const targetSeats = Math.min(guests, totalChairs);
+
+        // Distribute guests by filling the table that has the MOST chairs first,
+        // then move on to tables with fewer chairs.
+        const baseAssignments: Record<string, number> = {};
+        let remaining = targetSeats;
+
+        // Build a lookup for parent tables so we can use coordinates as a stable tie‑breaker
+        const parentTableById: Record<string, any> = {};
+        parentTablesForRes.forEach((t: any) => {
+          parentTableById[String(t.id)] = t;
+        });
+
+        const parentOrderDesc = parentIdsWithChairs
+          .slice()
+          .sort((a, b) => {
+            const countA = chairsByParent[a]?.length || 0;
+            const countB = chairsByParent[b]?.length || 0;
+            if (countA !== countB) return countB - countA; // more chairs first
+            const ta = parentTableById[a];
+            const tb = parentTableById[b];
+            const ay = Number(ta?.y) || 0;
+            const by = Number(tb?.y) || 0;
+            if (ay !== by) return ay - by;
+            const ax = Number(ta?.x) || 0;
+            const bx = Number(tb?.x) || 0;
+            return ax - bx;
+          });
+
+        for (const pid of parentOrderDesc) {
+          if (remaining <= 0) break;
+          const capacity = chairsByParent[pid]?.length || 0;
+          if (capacity <= 0) continue;
+          const take = Math.min(capacity, remaining);
+          if (take > 0) {
+            baseAssignments[pid] = take;
+            remaining -= take;
+          }
+        }
+
+        // Now pick specific chairs per parent table based on their assigned seat counts
+        const occupiedIds = new Set<string>();
+        parentIdsWithChairs.forEach((pid) => {
+          const count = baseAssignments[pid] || 0;
+          if (!count) return;
+          const chairs = chairsByParent[pid]
+            .slice()
+            .sort((a: any, b: any) => {
+              const ay = Number(a.y) || 0;
+              const by = Number(b.y) || 0;
+              if (ay !== by) return ay - by;
+              const ax = Number(a.x) || 0;
+              const bx = Number(b.x) || 0;
+              if (ax !== bx) return ax - bx;
+              return String(a.id).localeCompare(String(b.id));
+            });
+          chairs.slice(0, count).forEach((ch: any) => {
+            if (ch && ch.id != null) {
+              occupiedIds.add(String(ch.id));
+            }
+          });
+        });
+
+        if (occupiedIds.size > 0) {
+          map.set(r.id, occupiedIds);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to compute seated chair distribution", e);
     }
 
-    // circle (ellipse) ring
-    const rx = tableWidth / 2 + gap + strokeWidth / 2;
-    const ry = tableHeight / 2 + gap + strokeWidth / 2;
-    const cx = containerW / 2;
-    const cy = containerH / 2;
-    // Use pathLength normalization to express progress 0..1 and rotate so start is at 12 o'clock
+    return map;
+  }, [combinedReservations, selectedDate, zoneLayouts, doesReservationIncludeTable]);
 
-    return (
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          transform: `rotate(${rotation}deg)`,
-          transformOrigin: 'center',
-          left: -outerPad,
-          top: -outerPad,
-          width: containerW,
-          height: containerH
-        }}
-      >
-        <svg width={containerW} height={containerH}>
-          {/* Base track (always full ring) */}
-          <ellipse
-            cx={cx}
-            cy={cy}
-            rx={rx}
-            ry={ry}
-            fill="none"
-            stroke={color}
-            strokeOpacity={0.25}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            transform={`rotate(-90 ${cx} ${cy})`}
-            pathLength={1 as any}
-          />
-          <ellipse
-            cx={cx}
-            cy={cy}
-            rx={rx}
-            ry={ry}
-            fill="none"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            pathLength={1 as any}
-            strokeDasharray={`${Math.max(0, Math.min(1, progress))} 1`}
-            strokeLinecap="round"
-            transform={`rotate(-90 ${cx} ${cy})`}
-            className={isExpired ? 'respoint-stroke-pulse' : undefined}
-          />
-        </svg>
-        {isExpired ? (
-          <div
-            className="absolute inset-0 pointer-events-none respoint-glow-pulse-ring"
-            style={{ borderRadius: '9999px', zIndex: 9998, ['--rp-glow-color' as any]: color }}
-          />
-        ) : null}
-      </div>
-    );
-  };
+  // Helpers/components for seated reservations (ARRIVED)
+  const SeatedProgressStroke = SeatedProgressStrokeBase;
+  const ProgressStroke = ProgressStrokeBase;
 
   // Render table
   const renderTableWithHandles = (table: any) => {
@@ -6095,59 +6775,9 @@ const Canvas: React.FC<CanvasProps> = ({
     const height = table.height || 100;
     const rotation = table.rotation || 0;
     
-    // Helper: robust check if reservation's table_ids contain this table (by id, name or number)
-    const doesReservationIncludeTable = (rawIds: any[] | undefined | null, tbl: any): boolean => {
-      const normalize = (v: any) => String(v ?? '').trim().toLowerCase();
-      const ids = (rawIds || []).map((x: any) => normalize(x));
-      if (ids.length === 0) return false;
-      const tableId = normalize(tbl.id);
-      const tableName = tbl.name != null ? normalize(tbl.name) : '';
-      const tableNumberStr = (typeof tbl.number !== 'undefined' && tbl.number !== null) ? normalize(String(tbl.number)) : '';
-      // Exact string matches
-      if (ids.includes(tableId) || (tableName && ids.includes(tableName)) || (tableNumberStr && ids.includes(tableNumberStr))) {
-        return true;
-      }
-      // Numeric equivalence (handles cases like ' 1', '01', 'table 1')
-      const tblNum = (typeof tbl.number === 'number' && isFinite(tbl.number)) ? tbl.number : null;
-      if (tblNum !== null) {
-        for (const id of ids) {
-          const match = id.match(/\d+/);
-          if (match && parseInt(match[0], 10) === tblNum) {
-            return true;
-          }
-        }
-      }
-      // Fallback: map reservation IDs back to tables from zoneLayouts and compare numbers/names
-      try {
-        const allTables = Object.values(zoneLayouts || {}).flatMap(l => l?.tables || []);
-        if (allTables.length > 0) {
-          const byId: Record<string, any> = {};
-          for (const t of allTables) {
-            byId[normalize(t.id)] = t;
-          }
-          for (const id of ids) {
-            const t = byId[id];
-            if (t) {
-              const tName = t.name != null ? normalize(t.name) : '';
-              const tNumStr = (typeof t.number !== 'undefined' && t.number !== null) ? normalize(String(t.number)) : '';
-              if ((tName && tName === tableName) || (tNumStr && tNumStr === tableNumberStr)) {
-                return true;
-              }
-              // Also numeric equivalence between mapped table's number and current table's number
-              const mappedNum = (typeof t.number === 'number' && isFinite(t.number)) ? t.number : null;
-              if (mappedNum !== null && tblNum !== null && mappedNum === tblNum) {
-                return true;
-              }
-            }
-          }
-        }
-      } catch {}
-      return false;
-    };
-    
-    // Find reservation for this table on the selected date (across all zones)
+    // Find ALL reservations for this table on the selected date (across all zones)
     // Never associate reservations to chairs for hover/labels
-    const reservationForTable = table.type === 'chair' ? null : reservations.find(r => {
+    const allReservationsForTable = table.type === 'chair' ? [] : combinedReservations.filter(r => {
       const reservationDate = new Date(r.date);
       const calendarDate = selectedDate || new Date();
       // Same day check
@@ -6156,24 +6786,64 @@ const Canvas: React.FC<CanvasProps> = ({
         reservationDate.getMonth() === calendarDate.getMonth() &&
         reservationDate.getDate() === calendarDate.getDate();
       if (!sameDay) return false;
-      // Only show active reservations (waiting and confirmed)
-      if (!(r.status === 'waiting' || r.status === 'confirmed')) return false;
+      // Only show active reservations (waiting, confirmed, arrived but not cleared)
+      if (r.status === 'arrived') {
+        if ((r as any).cleared) return false;
+      } else if (!(r.status === 'waiting' || r.status === 'confirmed')) {
+        return false;
+      }
       // Robust match against table ids/names/numbers
       return doesReservationIncludeTable(r.tableIds as any[], table);
+    }).sort((a, b) => {
+      // Sort: arrived reservations first, then by time
+      if (a.status === 'arrived' && b.status !== 'arrived') return -1;
+      if (a.status !== 'arrived' && b.status === 'arrived') return 1;
+      // Same status - sort by time
+      const timeA = a.time || '00:00';
+      const timeB = b.time || '00:00';
+      return timeA.localeCompare(timeB);
     });
 
-    // Detect ARRIVED reservation for this table (for seated highlight)
-    const arrivedReservationForTable = table.type === 'chair' ? null : reservations.find(r => {
-      const reservationDate = new Date(r.date);
-      const calendarDate = selectedDate || new Date();
-      const sameDay =
-        reservationDate.getFullYear() === calendarDate.getFullYear() &&
-        reservationDate.getMonth() === calendarDate.getMonth() &&
-        reservationDate.getDate() === calendarDate.getDate();
-      if (!sameDay) return false;
-      if (r.status !== 'arrived') return false;
-      return doesReservationIncludeTable(r.tableIds as any[], table);
-    });
+    // Get current reservation index for this table (default to 0)
+    const currentTableResIndex = tableReservationIndexes[table.id] || 0;
+    const validIndex = Math.min(currentTableResIndex, Math.max(0, allReservationsForTable.length - 1));
+    const totalReservationsForTable = allReservationsForTable.length;
+    const hasMultipleReservations = totalReservationsForTable > 1;
+
+    // Get the currently displayed reservation (or null if none)
+    const currentDisplayedReservation = allReservationsForTable[validIndex] || null;
+
+    // Legacy compatibility: reservationForTable = waiting/confirmed reservation at current index
+    const reservationForTable = currentDisplayedReservation && 
+      (currentDisplayedReservation.status === 'waiting' || currentDisplayedReservation.status === 'confirmed')
+      ? currentDisplayedReservation : null;
+
+    // Legacy compatibility: arrivedReservationForTable = arrived reservation at current index
+    const arrivedReservationForTable = currentDisplayedReservation && 
+      currentDisplayedReservation.status === 'arrived' && !(currentDisplayedReservation as any).cleared
+      ? currentDisplayedReservation : null;
+
+    // Cycle to next reservation for this table
+    const cycleTableReservation = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (totalReservationsForTable <= 1) return;
+      const nextIndex = (validIndex + 1) % totalReservationsForTable;
+      const nextReservation = allReservationsForTable[nextIndex] || null;
+      setTableReservationIndexes(prev => ({
+        ...prev,
+        [table.id]: nextIndex
+      }));
+
+      // If this table is currently hovered (tooltip open), update tooltip content immediately
+      if (nextReservation) {
+        setHoveredTable(prev => {
+          if (!prev) return prev;
+          if (prev.tableId !== table.id) return prev;
+          return { ...prev, reservation: nextReservation as any };
+        });
+      }
+    };
 
     // If this reservation spans multiple tables, only display waiter labels on a single primary table to avoid duplicates
     const isPrimaryTableForReservation = reservationForTable
@@ -6181,6 +6851,15 @@ const Canvas: React.FC<CanvasProps> = ({
           const arr = (reservationForTable.tableIds || []) as any[];
           if (!arr || arr.length === 0) return false;
           // Use the same robust comparison for the first entry
+          return doesReservationIncludeTable([arr[0]], table);
+        })()
+      : false;
+
+    // Same logic for arrived reservations to avoid duplicate waiter labels on multi-table reservations
+    const isPrimaryTableForArrived = arrivedReservationForTable
+      ? (() => {
+          const arr = (arrivedReservationForTable.tableIds || []) as any[];
+          if (!arr || arr.length === 0) return false;
           return doesReservationIncludeTable([arr[0]], table);
         })()
       : false;
@@ -6205,12 +6884,206 @@ const Canvas: React.FC<CanvasProps> = ({
       }
     }
     
-    const waiterListForReservation = reservationForTable && isPrimaryTableForReservation ? getAssignedWaiters(reservationForTable.id) : [] as string[];
+    // Get waiter list for either waiting/confirmed OR arrived reservations
+    const waiterListForReservation = (reservationForTable && isPrimaryTableForReservation)
+      ? getAssignedWaiters(reservationForTable.id)
+      : (arrivedReservationForTable && isPrimaryTableForArrived)
+        ? getAssignedWaiters(arrivedReservationForTable.id)
+        : [] as string[];
     const hasWaiterLabels = waiterListForReservation && (waiterListForReservation as any).length > 0;
 
     const showVipStar = Boolean(reservationForTable?.isVip || arrivedReservationForTable?.isVip);
 
+    // For chairs: detect if their parent table has an ARRIVED reservation and
+    // tint only as many chairs as there are guests (numberOfGuests) in that
+    // reservation. Extra chairs on the same tables stay in the default color.
+    let chairSeatedColor: string | undefined;
+    // Optional z-index override so attached chairs follow their parent table's stacking
+    let chairZIndexOverride: number | undefined;
+    if (table.type === 'chair' && (table as any).attachedToTableId) {
+      try {
+        const parentId = (table as any).attachedToTableId;
+        const parentTable = ((interactionLayout || layout).tables || []).find((t: any) => t && t.id === parentId);
+        if (parentTable) {
+          const arrivedForParent = combinedReservations.find(r => {
+            const reservationDate = new Date(r.date);
+            const calendarDate = selectedDate || new Date();
+            const sameDay =
+              reservationDate.getFullYear() === calendarDate.getFullYear() &&
+              reservationDate.getMonth() === calendarDate.getMonth() &&
+              reservationDate.getDate() === calendarDate.getDate();
+            if (!sameDay) return false;
+            if (r.status !== 'arrived') return false;
+            // Exclude cleared reservations - guests have left
+            if ((r as any).cleared) return false;
+            return doesReservationIncludeTable(r.tableIds as any[], parentTable);
+          });
+          if (arrivedForParent) {
+            const occupiedSet = seatedChairIdsByReservation.get(arrivedForParent.id);
+            if (occupiedSet) {
+              if (occupiedSet.has(String(table.id))) {
+                chairSeatedColor = arrivedForParent.color || '#22c55e';
+              }
+            } else {
+              // Fallback: per-zone computation when global distribution is unavailable.
+              // Uses the same rule: fill the table with MOST chairs first.
+              const guests = Number((arrivedForParent as any).numberOfGuests) || 0;
+              if (guests > 0) {
+                const allTables = ((interactionLayout || layout).tables || []) as any[];
+                const parentTablesForRes = allTables.filter(
+                  (t: any) =>
+                    t &&
+                    t.type !== "chair" &&
+                    doesReservationIncludeTable(
+                      (arrivedForParent.tableIds || []) as any[],
+                      t
+                    )
+                );
+                if (parentTablesForRes.length > 0) {
+                  const parentIdsSet = new Set(parentTablesForRes.map((t: any) => String(t.id)));
+                  const chairsForRes = allTables.filter(
+                    (t: any) =>
+                      t &&
+                      t.type === "chair" &&
+                      t.attachedToTableId &&
+                      parentIdsSet.has(String(t.attachedToTableId))
+                  );
+                  if (chairsForRes.length > 0) {
+                    // Group chairs by parent table
+                    const chairsByParent: Record<string, any[]> = {};
+                    chairsForRes.forEach((ch: any) => {
+                      const pid = String(ch.attachedToTableId);
+                      if (!chairsByParent[pid]) chairsByParent[pid] = [];
+                      chairsByParent[pid].push(ch);
+                    });
+
+                    const parentIdsWithChairs = Object.keys(chairsByParent);
+                    const totalChairs = parentIdsWithChairs.reduce(
+                      (sum, pid) => sum + chairsByParent[pid].length,
+                      0
+                    );
+                    if (totalChairs > 0) {
+                      const targetSeats = Math.min(guests, totalChairs);
+                      const baseAssignments: Record<string, number> = {};
+                      let remainingLocal = targetSeats;
+
+                      const parentTableById: Record<string, any> = {};
+                      parentTablesForRes.forEach((t: any) => {
+                        parentTableById[String(t.id)] = t;
+                      });
+
+                      const parentOrderDesc = parentIdsWithChairs
+                        .slice()
+                        .sort((a, b) => {
+                          const countA = chairsByParent[a]?.length || 0;
+                          const countB = chairsByParent[b]?.length || 0;
+                          if (countA !== countB) return countB - countA;
+                          const ta = parentTableById[a];
+                          const tb = parentTableById[b];
+                          const ay = Number(ta?.y) || 0;
+                          const by = Number(tb?.y) || 0;
+                          if (ay !== by) return ay - by;
+                          const ax = Number(ta?.x) || 0;
+                          const bx = Number(tb?.x) || 0;
+                          return ax - bx;
+                        });
+
+                      for (const pid of parentOrderDesc) {
+                        if (remainingLocal <= 0) break;
+                        const capacity = chairsByParent[pid]?.length || 0;
+                        if (capacity <= 0) continue;
+                        const take = Math.min(capacity, remainingLocal);
+                        if (take > 0) {
+                          baseAssignments[pid] = take;
+                          remainingLocal -= take;
+                        }
+                      }
+
+                      const localOccupied = new Set<string>();
+                      parentIdsWithChairs.forEach((pid) => {
+                        const count = baseAssignments[pid] || 0;
+                        if (!count) return;
+                        const chairs = chairsByParent[pid]
+                          .slice()
+                          .sort((a: any, b: any) => {
+                            const ay = Number(a.y) || 0;
+                            const by = Number(b.y) || 0;
+                            if (ay !== by) return ay - by;
+                            const ax = Number(a.x) || 0;
+                            const bx = Number(b.x) || 0;
+                            if (ax !== bx) return ax - bx;
+                            return String(a.id).localeCompare(String(b.id));
+                          });
+                        chairs.slice(0, count).forEach((ch: any) => {
+                          if (ch && ch.id != null) {
+                            localOccupied.add(String(ch.id));
+                          }
+                        });
+                      });
+
+                      if (localOccupied.has(String(table.id))) {
+                        chairSeatedColor = arrivedForParent.color || "#22c55e";
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Z-index: make attached chairs follow the parent table's z-layer.
+          // Use parent's array index as base to respect the layer ordering from the layout,
+          // and keep chairs below the expiry ring/box (z-index 10049).
+          try {
+            const allTables = (interactionLayout || layout).tables || [];
+            const parentArrayIndex = allTables.findIndex((t: any) => t && t.id === parentTable.id);
+            // Base z from array position (later = higher). Multiply by 10 to leave room for status bumps.
+            // Max out at 9000 to stay below expiry ring/box (10049).
+            const positionBaseZ = Math.min(9000, Math.max(1, (parentArrayIndex + 1) * 10));
+
+            const parentIsSelected = selectedElements.includes(parentTable.id);
+            // Active (open) reservation for this parent table (waiting/confirmed)
+            const reservationForParent = combinedReservations.find(r => {
+              const reservationDate = new Date(r.date);
+              const calendarDate = selectedDate || new Date();
+              const sameDay =
+                reservationDate.getFullYear() === calendarDate.getFullYear() &&
+                reservationDate.getMonth() === calendarDate.getMonth() &&
+                reservationDate.getDate() === calendarDate.getDate();
+              if (!sameDay) return false;
+              if (!(r.status === 'waiting' || r.status === 'confirmed')) return false;
+              return doesReservationIncludeTable(r.tableIds as any[], parentTable);
+            });
+
+            const waiterListForParent =
+              reservationForParent ? getAssignedWaiters(reservationForParent.id) : ([] as string[]);
+            const hasWaiterLabelsParent =
+              waiterListForParent && (waiterListForParent as any).length > 0;
+
+            // If parent has any open or arrived reservation, treat it as elevated
+            const parentHasActiveReservation = Boolean(reservationForParent || arrivedForParent);
+
+            // Status bump: add small increments for different states, but keep below expiry ring
+            const statusBump = parentHasActiveReservation
+              ? 5
+              : parentIsSelected
+              ? 3
+              : hasWaiterLabelsParent
+              ? 4
+              : 0;
+
+            // Chairs get parent's position-based z minus 1 (so they're behind the parent table itself)
+            // plus the status bump to follow the parent's elevation for reservations/selection.
+            chairZIndexOverride = Math.min(9000, positionBaseZ + statusBump - 1);
+          } catch {
+            // On any error, fall back to the default chair z-index
+          }
+        }
+      } catch {}
+    }
+
     // Elevate z-index for the table that actually renders the countdown label (group leader or single)
+    // Also elevate for SEATED (ARRIVED) reservations so their time badge + dashed stroke render above chairs.
     let elevateForLabel = false;
     if (waitingColor && reservationForTable?.date && reservationForTable?.time && table.type !== 'chair') {
       try {
@@ -6254,6 +7127,71 @@ const Canvas: React.FC<CanvasProps> = ({
         }
       } catch {}
     }
+    // For ARRIVED (seated) reservations, elevate only the leader table in a connected
+    // group (or the single table) so its ring + badge sit above all joined tables.
+    if (!elevateForLabel && arrivedReservationForTable && table.type !== 'chair') {
+      try {
+        const currentTables = ((interactionLayout || layout).tables || []).filter((t: any) => t && t.type !== 'chair');
+        const grouped = currentTables.filter((t: any) => doesReservationIncludeTable((arrivedReservationForTable.tableIds || []) as any[], t));
+        if (grouped.length > 1) {
+          const eps = 2;
+          const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+          const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+          const touch = (a: any, b: any) => {
+            const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+            const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+            const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+            return horizontalTouch || verticalTouch || overlap;
+          };
+          const rects = grouped.map(getRect);
+          const startRect = getRect(table);
+          const visited: any = { [startRect.id]: true };
+          const queue: any[] = [startRect];
+          const component: any[] = [startRect];
+          while (queue.length) {
+            const cur = queue.shift();
+            for (const r of rects) {
+              if (!visited[r.id] && touch(cur, r)) {
+                visited[r.id] = true;
+                queue.push(r);
+                component.push(r);
+              }
+            }
+          }
+          if (component.length > 1) {
+            const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+            if (leaderRect && table.id === leaderRect.id) {
+              elevateForLabel = true;
+            }
+          } else {
+            elevateForLabel = true;
+          }
+        } else {
+          elevateForLabel = true;
+        }
+      } catch {
+        // Fallback: at least keep the seated visuals above chairs for this table
+        elevateForLabel = true;
+      }
+    }
+    // Use array position for z-index to respect layer ordering
+    const allTablesForZ = (interactionLayout || layout).tables || [];
+    const tableArrayIndex = allTablesForZ.findIndex((t: any) => t && t.id === table.id);
+    const positionBaseZ = Math.min(9000, Math.max(1, (tableArrayIndex + 1) * 10));
+
+    // Tables with countdown labels need to be elevated ABOVE all chairs and other tables
+    // so their time badges are visible
+    const baseZ = table.type === 'chair'
+      ? Math.max(1, positionBaseZ - 1) // Chairs slightly below their layer position
+      : elevateForLabel
+        ? 9800 // High z-index for tables with time boxes (above all chairs/tables)
+        : (positionBaseZ + (isSelected ? 3 : (hasWaiterLabels ? 4 : 0)));
+
+    const effectiveZ =
+      table.type === 'chair' && typeof chairZIndexOverride === 'number'
+        ? chairZIndexOverride
+        : baseZ;
+
     return (
       <div
         key={table.id}
@@ -6265,7 +7203,7 @@ const Canvas: React.FC<CanvasProps> = ({
           height: `${height}px`,
           transform: `rotate(${rotation}deg)`,
           transformOrigin: 'center',
-          zIndex: elevateForLabel ? 150 : (isSelected ? 10 : (hasWaiterLabels ? 20 : (table.type === 'chair' ? 2 : 1)))
+          zIndex: effectiveZ
         }}
         onMouseDown={(e) => handleDragStart(e, table.id)}
         onClick={(e) => handleElementClick(e, table.id)}
@@ -6296,9 +7234,11 @@ const Canvas: React.FC<CanvasProps> = ({
               const txt = e.dataTransfer.getData('text/plain');
               if (txt) name = txt;
             }
-            if (name && reservationForTable) {
-              setAssignedWaiter(reservationForTable.id, name);
-              try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name } })); } catch {}
+            // Use hoverableReservation to support both waiting/confirmed AND arrived reservations (regular and event)
+            const targetReservation = hoverableReservation;
+            if (name && targetReservation) {
+              setAssignedWaiter(targetReservation.id, name);
+              try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: targetReservation.id, name } })); } catch {}
             }
             setIsWaiterDragActive(false);
           } catch {}
@@ -6312,7 +7252,9 @@ const Canvas: React.FC<CanvasProps> = ({
           setHoveredElementId(table.id);
           if (hoverableReservation && !isEditing && table.type !== 'chair') {
             const rect = canvasRef.current!.getBoundingClientRect();
-            const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+            const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+            const canvasX = localX - canvasOffset.x;
+            const canvasY = localY - canvasOffset.y;
             setHoveredTable({
               tableId: table.id,
               reservation: hoverableReservation,
@@ -6330,7 +7272,9 @@ const Canvas: React.FC<CanvasProps> = ({
         onMouseMove={(e) => {
           if (hoveredTable && hoveredTable.tableId === table.id && !isEditing) {
             const rect = canvasRef.current!.getBoundingClientRect();
-            const { x: canvasX, y: canvasY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+            const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+            const canvasX = localX - canvasOffset.x;
+            const canvasY = localY - canvasOffset.y;
             if (hoverRafRef.current == null) {
               hoverRafRef.current = requestAnimationFrame(() => {
                 setHoveredTable(prev => {
@@ -6364,8 +7308,9 @@ const Canvas: React.FC<CanvasProps> = ({
                     height: '70%',
                     transform: 'translate(-50%, -50%)',
                     borderRadius: '9999px',
-                    backgroundColor: table.color || '#ECEFF3',
-                    boxSizing: 'border-box'
+                    backgroundColor: chairSeatedColor || table.color || '#ECEFF3',
+                    boxSizing: 'border-box',
+                    opacity: chairSeatedColor ? 0.5 : 1
                   }}
                 />
               </div>
@@ -6390,7 +7335,15 @@ const Canvas: React.FC<CanvasProps> = ({
                       );
                     })()}
                   </defs>
-                  <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-curved-arc-mask-${table.id})`} />
+                  <rect
+                    x="0"
+                    y="0"
+                    width="100"
+                    height="100"
+                    fill={chairSeatedColor || table.color || '#ECEFF3'}
+                    opacity={chairSeatedColor ? 0.5 : 1}
+                    mask={`url(#booth-curved-arc-mask-${table.id})`}
+                  />
                 </svg>
               ) : (
               <svg className="w-full h-full select-none" viewBox="0 0 100 50" preserveAspectRatio="none">
@@ -6409,7 +7362,15 @@ const Canvas: React.FC<CanvasProps> = ({
                     );
                   })()}
                 </defs>
-                <rect x="0" y="0" width="100" height="50" fill={table.color || '#ECEFF3'} mask={`url(#booth-curved-mask-${table.id})`} />
+                <rect
+                  x="0"
+                  y="0"
+                  width="100"
+                  height="50"
+                  fill={chairSeatedColor || table.color || '#ECEFF3'}
+                  opacity={chairSeatedColor ? 0.5 : 1}
+                  mask={`url(#booth-curved-mask-${table.id})`}
+                />
               </svg>
               )
             ) : table.chairVariant === 'boothU' ? (
@@ -6433,7 +7394,15 @@ const Canvas: React.FC<CanvasProps> = ({
                       );
                     })()}
                   </defs>
-                  <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-u-arc-mask-${table.id})`} />
+                  <rect
+                    x="0"
+                    y="0"
+                    width="100"
+                    height="100"
+                    fill={chairSeatedColor || table.color || '#ECEFF3'}
+                    opacity={chairSeatedColor ? 0.5 : 1}
+                    mask={`url(#booth-u-arc-mask-${table.id})`}
+                  />
                 </svg>
               ) : (
               <svg className="w-full h-full select-none" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -6460,15 +7429,24 @@ const Canvas: React.FC<CanvasProps> = ({
                     );
                   })()}
                 </defs>
-                <rect x="0" y="0" width="100" height="100" fill={table.color || '#ECEFF3'} mask={`url(#booth-u-mask-${table.id})`} />
+                <rect
+                  x="0"
+                  y="0"
+                  width="100"
+                  height="100"
+                  fill={chairSeatedColor || table.color || '#ECEFF3'}
+                  opacity={chairSeatedColor ? 0.5 : 1}
+                  mask={`url(#booth-u-mask-${table.id})`}
+                />
               </svg>
               )
             ) : (
           <div
             className="w-full h-full select-none rounded-lg"
             style={{
-              backgroundColor: table.color || '#ECEFF3',
-              boxSizing: 'border-box'
+              backgroundColor: chairSeatedColor || table.color || '#ECEFF3',
+              boxSizing: 'border-box',
+              opacity: chairSeatedColor ? 0.5 : 1
             }}
           />
             )}
@@ -6509,12 +7487,97 @@ const Canvas: React.FC<CanvasProps> = ({
                         </svg>
                       </span>
                     ) : null}
-                  </span>
+                    </span>
                 </div>
                 {/* Removed static dashed table border for seated; only progress ring remains */}
                 {/* Seated (ARRIVED) progress + time inside table */}
                 {arrivedReservationForTable && arrivedColor ? (
                   <>
+                    {/* Connected-group ring for ARRIVED reservations (like waiting ring) */}
+                    {(() => {
+                      if (!(arrivedReservationForTable?.date && arrivedReservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((arrivedReservationForTable.tableIds || []) as any[], t));
+                      let overlay: React.ReactNode | null = null;
+                      let suppressIndividual = false;
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const groupH = Math.max(0, maxY - minY);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            overlay = (
+                              <div
+                                className="absolute pointer-events-none"
+                                style={{
+                                  left: `${(minX + groupW / 2) - table.x}px`,
+                                  top: `${(minY + groupH / 2) - table.y}px`,
+                                  width: `${groupW}px`,
+                                  height: `${groupH}px`,
+                                  transform: 'translate(-50%, -50%)',
+                                  willChange: 'left, top, width, height'
+                                }}
+                              >
+                                <SeatedProgressStroke
+                                  shape="rect"
+                                  tableWidth={groupW}
+                                  tableHeight={groupH}
+                                  rotation={0}
+                                  color={arrivedColor}
+                                  reservation={arrivedReservationForTable}
+                                  gap={4}
+                                  strokeWidth={3}
+                                  borderRadiusPx={8}
+                                  tableId={table.id}
+                                />
+                              </div>
+                            );
+                          } else {
+                            suppressIndividual = true;
+                          }
+                        }
+                      }
+                      if (!overlay && !suppressIndividual) {
+                        overlay = (
+                          <div
+                            className="absolute pointer-events-none"
+                            style={{
+                              left: `${width / 2}px`,
+                              top: `${height / 2}px`,
+                              width: `${width}px`,
+                              height: `${height}px`,
+                              transform: 'translate(-50%, -50%)',
+                              willChange: 'left, top, width, height'
+                            }}
+                          >
                     <SeatedProgressStroke
                       shape="rect"
                       tableWidth={width}
@@ -6525,19 +7588,16 @@ const Canvas: React.FC<CanvasProps> = ({
                       gap={4}
                       strokeWidth={3}
                       borderRadiusPx={8}
+                      tableId={table.id}
                     />
-                    {/* top-edge inside label */}
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
-                    >
-                      <div className="absolute" style={{ top: '4px', left: '50%', transform: 'translate(-50%, -60%)' }}>
-                        <SeatedCountdownBadge reservation={arrivedReservationForTable} color={arrivedColor} />
-                      </div>
-                    </div>
+                          </div>
+                        );
+                      }
+                      return overlay;
+                    })()}
                   </>
                 ) : null}
-                {/* Waiting progress ring + top-edge countdown label */}
+                {/* Waiting progress ring */}
                 {waitingColor ? (
                   <>
                     {/* Compute connected group (only tables whose edges touch this table) */}
@@ -6646,93 +7706,12 @@ const Canvas: React.FC<CanvasProps> = ({
                       }
                       return overlay;
                     })()}
-                    {/* Top-edge time label - single label for grouped ring, else per-table */}
-                    {(() => {
-                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
-                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
-                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
-                      if (grouped.length > 1) {
-                        const eps = 2;
-                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
-                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
-                        const touch = (a: any, b: any) => {
-                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
-                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
-                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
-                          return horizontalTouch || verticalTouch || overlap;
-                        };
-                        const rects = grouped.map(getRect);
-                        const startRect = getRect(table);
-                        const visited: any = { [startRect.id]: true };
-                        const queue: any[] = [startRect];
-                        const component: any[] = [startRect];
-                        while (queue.length) {
-                          const cur = queue.shift();
-                          for (const r of rects) {
-                            if (!visited[r.id] && touch(cur, r)) {
-                              visited[r.id] = true;
-                              queue.push(r);
-                              component.push(r);
-                            }
-                          }
-                        }
-                        if (component.length > 1) {
-                          const minX = Math.min(...component.map(r => r.l));
-                          const minY = Math.min(...component.map(r => r.t));
-                          const maxX = Math.max(...component.map(r => r.r));
-                          const maxY = Math.max(...component.map(r => r.b));
-                          const groupW = Math.max(0, maxX - minX);
-                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
-                          if (leaderRect && table.id === leaderRect.id) {
-                            return (
-                              <div
-                                className="absolute pointer-events-none"
-                                style={{ left: `${minX - table.x}px`, top: `${minY - table.y}px`, width: `${groupW}px`, height: `0px`, zIndex: 9999 }}
-                              >
-                                <div
-                                  className="absolute"
-                                  style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}
-                                >
-                                  <div
-                                    className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
-                                    style={{
-                                      backgroundColor: waitingColor,
-                                      color: '#FFFFFF',
-                                      border: `1px solid ${waitingColor}`,
-                                      boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
-                                    }}
-                                  >
-                                    <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          }
-                          // Non-leader in group: hide label
-                          return null;
-                        }
-                      }
-                      // Fallback: per-table label aligned to table rotation
-                      return (
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center', zIndex: 9999 }}
-                        >
-                          <div className="absolute" style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}>
-                            <div
-                              className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
-                              style={{ backgroundColor: waitingColor, color: '#FFFFFF', border: `1px solid ${waitingColor}`, boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
-                            >
-                              <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
                   </>
                 ) : null}
-                {reservationForTable && isPrimaryTableForReservation ? (() => {
-                  const list = getAssignedWaiters(reservationForTable.id);
+                {/* Waiter chips for waiting/confirmed OR arrived reservations */}
+                {((reservationForTable && isPrimaryTableForReservation) || (arrivedReservationForTable && isPrimaryTableForArrived)) ? (() => {
+                  const targetRes = reservationForTable || arrivedReservationForTable;
+                  const list = targetRes ? getAssignedWaiters(targetRes.id) : [];
                   return list && list.length > 0 ? (
                     <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
@@ -6751,9 +7730,9 @@ const Canvas: React.FC<CanvasProps> = ({
                             onClick={(e) => {
                               e.stopPropagation();
                               e.preventDefault();
-                              if (reservationForTable) {
-                                removeAssignedWaiter(reservationForTable.id, w);
-                                try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name: null } })); } catch {}
+                              if (targetRes) {
+                                removeAssignedWaiter(targetRes.id, w);
+                                try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: targetRes.id, name: null } })); } catch {}
                               }
                             }}
                             className={
@@ -6808,12 +7787,96 @@ const Canvas: React.FC<CanvasProps> = ({
                         </svg>
                       </span>
                     ) : null}
-                  </span>
+                    </span>
                 </div>
                 {/* Removed static dashed table border for seated; only progress ring remains */}
                 {/* Seated (ARRIVED) progress + time inside table - circle */}
                 {arrivedReservationForTable && arrivedColor ? (
                   <>
+                    {/* Connected-group ring for ARRIVED reservations on circular tables */}
+                    {(() => {
+                      if (!(arrivedReservationForTable?.date && arrivedReservationForTable?.time)) return null;
+                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
+                      const grouped = currentTables.filter(t => doesReservationIncludeTable((arrivedReservationForTable.tableIds || []) as any[], t));
+                      let overlay: React.ReactNode | null = null;
+                      let suppressIndividual = false;
+                      if (grouped.length > 1) {
+                        const eps = 2;
+                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
+                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
+                        const touch = (a: any, b: any) => {
+                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
+                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
+                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
+                          return horizontalTouch || verticalTouch || overlap;
+                        };
+                        const rects = grouped.map(getRect);
+                        const startRect = getRect(table);
+                        const visited: any = { [startRect.id]: true };
+                        const queue: any[] = [startRect];
+                        const component: any[] = [startRect];
+                        while (queue.length) {
+                          const cur = queue.shift();
+                          for (const r of rects) {
+                            if (!visited[r.id] && touch(cur, r)) {
+                              visited[r.id] = true;
+                              queue.push(r);
+                              component.push(r);
+                            }
+                          }
+                        }
+                        if (component.length > 1) {
+                          const minX = Math.min(...component.map(r => r.l));
+                          const minY = Math.min(...component.map(r => r.t));
+                          const maxX = Math.max(...component.map(r => r.r));
+                          const maxY = Math.max(...component.map(r => r.b));
+                          const groupW = Math.max(0, maxX - minX);
+                          const groupH = Math.max(0, maxY - minY);
+                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
+                          if (leaderRect && table.id === leaderRect.id) {
+                            overlay = (
+                              <div
+                                className="absolute pointer-events-none"
+                                style={{
+                                  left: `${(minX + groupW / 2) - table.x}px`,
+                                  top: `${(minY + groupH / 2) - table.y}px`,
+                                  width: `${groupW}px`,
+                                  height: `${groupH}px`,
+                                  transform: 'translate(-50%, -50%)',
+                                  willChange: 'left, top, width, height'
+                                }}
+                              >
+                                <SeatedProgressStroke
+                                  shape="rect"
+                                  tableWidth={groupW}
+                                  tableHeight={groupH}
+                                  rotation={0}
+                                  color={arrivedColor}
+                                  reservation={arrivedReservationForTable}
+                                  gap={4}
+                                  strokeWidth={3}
+                                  tableId={table.id}
+                                />
+                              </div>
+                            );
+                          } else {
+                            suppressIndividual = true;
+                          }
+                        }
+                      }
+                      if (!overlay && !suppressIndividual) {
+                        overlay = (
+                          <div
+                            className="absolute pointer-events-none"
+                            style={{
+                              left: `${width / 2}px`,
+                              top: `${height / 2}px`,
+                              width: `${width}px`,
+                              height: `${height}px`,
+                              transform: 'translate(-50%, -50%)',
+                              willChange: 'left, top, width, height'
+                            }}
+                          >
                     <SeatedProgressStroke
                       shape="circle"
                       tableWidth={width}
@@ -6823,18 +7886,16 @@ const Canvas: React.FC<CanvasProps> = ({
                       reservation={arrivedReservationForTable}
                       gap={4}
                       strokeWidth={3}
+                      tableId={table.id}
                     />
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
-                    >
-                      <div className="absolute" style={{ top: '4px', left: '50%', transform: 'translate(-50%, -60%)' }}>
-                        <SeatedCountdownBadge reservation={arrivedReservationForTable} color={arrivedColor} />
-                      </div>
-                    </div>
+                          </div>
+                        );
+                      }
+                      return overlay;
+                    })()}
                   </>
                 ) : null}
-                {/* Waiting progress ring + top-edge countdown label for circular tables */}
+                {/* Waiting progress ring for circular tables */}
                 {waitingColor ? (
                   <>
                     {/* Compute connected group (only tables whose edges touch this table) */}
@@ -6942,91 +8003,12 @@ const Canvas: React.FC<CanvasProps> = ({
                       }
                       return overlay;
                     })()}
-                    {/* Top-edge time label - single label for grouped ring, else per-table */}
-                    {(() => {
-                      if (!(reservationForTable?.date && reservationForTable?.time)) return null;
-                      const currentTables = ((interactionLayout || layout).tables || []).filter(t => t && t.type !== 'chair');
-                      const grouped = currentTables.filter(t => doesReservationIncludeTable((reservationForTable.tableIds || []) as any[], t));
-                      if (grouped.length > 1) {
-                        const eps = 2;
-                        const getRect = (t: any) => ({ l: t.x, t: t.y, r: t.x + (t.width || 100), b: t.y + (t.height || 100), id: t.id });
-                        const overlap1D = (a1: any, a2: any, b1: any, b2: any) => (Math.min(a2, b2) - Math.max(a1, b1)) >= -eps;
-                        const touch = (a: any, b: any) => {
-                          const horizontalTouch = (Math.abs(a.r - b.l) <= eps || Math.abs(b.r - a.l) <= eps) && overlap1D(a.t, a.b, b.t, b.b);
-                          const verticalTouch = (Math.abs(a.b - b.t) <= eps || Math.abs(b.b - a.t) <= eps) && overlap1D(a.l, a.r, b.l, b.r);
-                          const overlap = !(a.r < b.l - eps || a.l > b.r + eps || a.b < b.t - eps || a.t > b.b + eps);
-                          return horizontalTouch || verticalTouch || overlap;
-                        };
-                        const rects = grouped.map(getRect);
-                        const startRect = getRect(table);
-                        const visited: any = { [startRect.id]: true };
-                        const queue: any[] = [startRect];
-                        const component: any[] = [startRect];
-                        while (queue.length) {
-                          const cur = queue.shift();
-                          for (const r of rects) {
-                            if (!visited[r.id] && touch(cur, r)) {
-                              visited[r.id] = true;
-                              queue.push(r);
-                              component.push(r);
-                            }
-                          }
-                        }
-                        if (component.length > 1) {
-                          const minX = Math.min(...component.map(r => r.l));
-                          const minY = Math.min(...component.map(r => r.t));
-                          const maxX = Math.max(...component.map(r => r.r));
-                          const maxY = Math.max(...component.map(r => r.b));
-                          const groupW = Math.max(0, maxX - minX);
-                          const leaderRect = [...component].sort((a, b) => (a.t - b.t) || (a.l - b.l))[0];
-                          if (leaderRect && table.id === leaderRect.id) {
-                            return (
-                              <div
-                                className="absolute pointer-events-none"
-                                style={{ left: `${minX - table.x}px`, top: `${minY - table.y}px`, width: `${groupW}px`, height: `0px`, zIndex: 9999 }}
-                              >
-                                <div
-                                  className="absolute"
-                                  style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}
-                                >
-                                  <div
-                                    className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
-                                    style={{
-                                      backgroundColor: waitingColor,
-                                      color: '#FFFFFF',
-                                      border: `1px solid ${waitingColor}`,
-                                      boxShadow: '0 1px 2px rgba(0,0,0,0.35)',
-                                    }}
-                                  >
-                                    <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }
-                      }
-                      return (
-                        <div
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center', zIndex: 9999 }}
-                        >
-                          <div className="absolute" style={{ top: '-6px', left: '50%', transform: 'translate(-50%, -60%)' }}>
-                            <div
-                              className="rounded px-1.5 py-0.5 text-[10px] leading-none shadow"
-                              style={{ backgroundColor: waitingColor, color: '#FFFFFF', border: `1px solid ${waitingColor}`, boxShadow: '0 1px 2px rgba(0,0,0,0.35)' }}
-                            >
-                              <InlineCountdown reservationDate={reservationForTable.date} reservationTime={reservationForTable.time} />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
                   </>
                 ) : null}
-                {reservationForTable && isPrimaryTableForReservation ? (() => {
-                  const list = getAssignedWaiters(reservationForTable.id);
+                {/* Waiter chips for waiting/confirmed OR arrived reservations (circular tables) */}
+                {((reservationForTable && isPrimaryTableForReservation) || (arrivedReservationForTable && isPrimaryTableForArrived)) ? (() => {
+                  const targetRes = reservationForTable || arrivedReservationForTable;
+                  const list = targetRes ? getAssignedWaiters(targetRes.id) : [];
                   return list && list.length > 0 ? (
                     <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-1 px-1 overflow-visible pointer-events-none">
                       {list.map(w => (
@@ -7045,9 +8027,9 @@ const Canvas: React.FC<CanvasProps> = ({
                             onClick={(e) => {
                               e.stopPropagation();
                               e.preventDefault();
-                              if (reservationForTable) {
-                                removeAssignedWaiter(reservationForTable.id, w);
-                                try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: reservationForTable.id, name: null } })); } catch {}
+                              if (targetRes) {
+                                removeAssignedWaiter(targetRes.id, w);
+                                try { window.dispatchEvent(new CustomEvent('respoint-waiter-assigned', { detail: { reservationId: targetRes.id, name: null } })); } catch {}
                               }
                             }}
                             className={
@@ -7069,6 +8051,31 @@ const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
             
+        {/* Multi-reservation indicator badge - positioned at top edge of table */}
+        {hasMultipleReservations && currentDisplayedReservation && table.type !== 'chair' && (
+          <button
+            onClick={cycleTableReservation}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute flex items-center justify-center text-[10px] font-bold shadow-lg border-2 cursor-pointer hover:scale-110 transition-transform"
+            style={{
+              transform: 'translate(-50%, -50%)',
+              top: '0px',
+              left: '50%',
+              minWidth: '28px',
+              height: '20px',
+              paddingLeft: '6px',
+              paddingRight: '6px',
+              borderRadius: '10px',
+              backgroundColor: currentDisplayedReservation.status === 'arrived' ? '#22c55e' : '#f59e0b',
+              color: 'white',
+              borderColor: 'white',
+              zIndex: 10100
+            }}
+            title={`${validIndex + 1}/${totalReservationsForTable} rezervacija - klikni za sledeću`}
+          >
+            {validIndex + 1}/{totalReservationsForTable}
+          </button>
+        )}
 
       </div>
     );
@@ -7398,16 +8405,7 @@ const Canvas: React.FC<CanvasProps> = ({
       walls: [...(layout.walls || []), ...newWalls],
       texts: [...(layout.texts || []), ...newTexts]
     });
-    
-    // Update global next auto number based on the highest duplicated table number
-    if (newTables.length > 0) {
-      const duplicatedMax = newTables
-        .map(t => (typeof t.number === 'number' && isFinite(t.number) ? t.number : 0))
-        .reduce((m, n) => Math.max(m, n), 0);
-      const nextFromDuplicate = Math.min(999, Math.max(1, duplicatedMax + 1));
-      setNextAutoTableNumber(nextFromDuplicate);
-    }
-    
+
     // Select the duplicates
     setSelectedElements(duplicates);
     
@@ -7509,8 +8507,12 @@ const Canvas: React.FC<CanvasProps> = ({
       const text = currentLayout.texts?.find(t => t.id === elementId);
       
       if (table) {
+        // Skip chairs when calculating group bounding box - they are "glued" to parent tables
+        // and shouldn't affect anchor points for scaling/rotation operations
+        if (table.type === 'chair') return;
+        
         // Get all corners of the table in global coordinates
-          const corners = getRotatedRectangleCorners(
+        const corners = getRotatedRectangleCorners(
           table.x, table.y, table.width || 100, table.height || 100, table.rotation || 0
         );
         allCorners.push(...corners);
@@ -7619,12 +8621,15 @@ const Canvas: React.FC<CanvasProps> = ({
       // show an oriented bounding box aligned to that common rotation so the selection
       // visually matches the group's edges even when not actively rotating.
       // Compute common rotation modulo 180° (orientation equivalence).
+      // Skip chairs as they have their own rotation and are "glued" to parent tables.
       const current = interactionLayout || layout;
       const anglesDeg: number[] = [];
       selectedElements.forEach(elementId => {
         const table = current.tables?.find(t => t.id === elementId);
         const wall = current.walls?.find(w => w.id === elementId);
         const text = current.texts?.find(t => t.id === elementId);
+        // Skip chairs - they have their own rotation and shouldn't affect group rotation calculation
+        if (table && table.type === 'chair') return;
         if (table && typeof table.rotation === 'number') {
           anglesDeg.push(normalizeAngle(table.rotation) % 180);
         } else if (text && typeof text.rotation === 'number') {
@@ -7646,10 +8651,12 @@ const Canvas: React.FC<CanvasProps> = ({
       
       if (allSameRotation) {
         // Use the first element's full rotation (0..360) as display rotation
-        // Find a representative element to extract absolute angle
+        // Find a representative element to extract absolute angle (skip chairs)
         let displayAngle = 0;
         const repId = selectedElements.find(id => {
           const t = current.tables?.find(x => x.id === id);
+          // Skip chairs when finding representative element
+          if (t && t.type === 'chair') return false;
           const tx = current.texts?.find(x => x.id === id);
           const w = current.walls?.find(x => x.id === id);
           return (t && typeof t.rotation === 'number') || (tx && typeof tx.rotation === 'number') || !!w;
@@ -7658,7 +8665,7 @@ const Canvas: React.FC<CanvasProps> = ({
           const t = current.tables?.find(x => x.id === repId);
           const tx = current.texts?.find(x => x.id === repId);
           const w = current.walls?.find(x => x.id === repId);
-          if (t && typeof t.rotation === 'number') {
+          if (t && t.type !== 'chair' && typeof t.rotation === 'number') {
             displayAngle = normalizeAngle(t.rotation || 0);
           } else if (tx && typeof tx.rotation === 'number') {
             displayAngle = normalizeAngle(tx.rotation || 0);
@@ -8229,7 +9236,9 @@ const Canvas: React.FC<CanvasProps> = ({
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect && e.clientX >= rect.left && e.clientX <= rect.right && 
           e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        const { x, y } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+        const { x: localX, y: localY } = getZoomAdjustedCoordinates(e.clientX, e.clientY, rect);
+        const x = localX - canvasOffset.x;
+        const y = localY - canvasOffset.y;
         const elementAtPosition = getElementAtPosition(x, y);
         if (!elementAtPosition) {
           setSelectedElements([]);
@@ -8673,6 +9682,7 @@ const Canvas: React.FC<CanvasProps> = ({
                linear-gradient(90deg, ${isLight ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255,255,255,0.06)'} 1px, transparent 1px)`
             : undefined,
           backgroundSize: isEditing ? `${GRID_SIZE}px ${GRID_SIZE}px` : undefined,
+          backgroundPosition: isEditing ? `${canvasOffset.x}px ${canvasOffset.y}px` : undefined,
           touchAction: 'none',
         }}
         onClick={handleCanvasClick}
@@ -8759,6 +9769,59 @@ const Canvas: React.FC<CanvasProps> = ({
             })()}
           </div>
         )}
+        {/* Canvas position controls (top-right) */}
+        {isEditing && (
+          <div
+            className="absolute right-2 top-12 z-[160] opacity-40 hover:opacity-100 transition-opacity select-none"
+            style={{ background: 'transparent' }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="inline-flex flex-col items-center gap-1 bg-black/40 border border-white/10 rounded-md px-2 py-1">
+              <span className="text-[10px] text-gray-200 mb-0.5">
+                {currentLanguage === 'srb' ? 'Pozicija šeme' : 'Layout position'}
+              </span>
+              <button
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-gray-200"
+                onClick={() => nudgeCanvas(0, -CANVAS_OFFSET_STEP)}
+              >
+                ↑
+              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-gray-200"
+                  onClick={() => nudgeCanvas(-CANVAS_OFFSET_STEP, 0)}
+                >
+                  ←
+                </button>
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-[10px] text-gray-200"
+                  onClick={resetCanvasOffset}
+                  title={currentLanguage === 'srb' ? 'Vrati u početni položaj' : 'Reset position'}
+                >
+                  ●
+                </button>
+                <button
+                  className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-gray-200"
+                  onClick={() => nudgeCanvas(CANVAS_OFFSET_STEP, 0)}
+                >
+                  →
+                </button>
+              </div>
+              <button
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 text-gray-200"
+                onClick={() => nudgeCanvas(0, CANVAS_OFFSET_STEP)}
+              >
+                ↓
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Pannable layout content (tables, walls, texts, drawing, marquee, text editing) */}
+        <div
+          className="absolute inset-0"
+          style={{ transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px)` }}
+        >
         {/* Tables with resize handles */}
         {(interactionLayout || layout).tables?.map(table => renderTableWithHandles(table))}
 
@@ -8854,6 +9917,7 @@ const Canvas: React.FC<CanvasProps> = ({
               />
             </div>
         )}
+        </div>
 
         {/* Context Menu */}
         {showContextMenu && (
@@ -8884,7 +9948,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
                   onClick={() => handleContextMenuAction('delete')}
                 >
-                  {'Delete'}
+                  {t('delete')}
                   <span className="ml-auto text-[11px] opacity-60">Del</span>
                 </button>
               </>
@@ -8902,14 +9966,14 @@ const Canvas: React.FC<CanvasProps> = ({
                   className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
                   onClick={() => handleContextMenuAction('add_seats')}
                 >
-                  {'Add seats'}
+                  {currentLanguage === 'srb' ? 'Dodaj stolice' : 'Add seats'}
                 </button>
                 <div className="my-1 h-px bg-[var(--border)]" />
                 <button
                   className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
                   onClick={() => handleContextMenuAction('delete')}
                 >
-                  {'Delete'}
+                  {t('delete')}
                   <span className="ml-auto text-[11px] opacity-60">Del</span>
                 </button>
               </>
@@ -8953,7 +10017,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   className="px-3 h-8 hover:bg-[var(--chip)] w-full text-left flex items-center gap-2 rounded-md"
                   onClick={() => handleContextMenuAction('delete')}
                 >
-                  {'Delete'}
+                  {t('delete')}
                   <span className="ml-auto text-[11px] opacity-60">Del</span>
                 </button>
               </>
@@ -8999,7 +10063,12 @@ const Canvas: React.FC<CanvasProps> = ({
             />
           );
         })()}
-        
+
+        {/* Pannable overlays tied to layout coordinates (number conflict, hover card, selection, placeholder) */}
+        <div
+          className="absolute inset-0"
+          style={{ transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px)`, pointerEvents: 'none' }}
+        >
         {/* Number conflict popup (quick confirm) */}
         {numberConflict && (() => {
           const currentLayout = interactionLayout || layout;
@@ -9051,7 +10120,7 @@ const Canvas: React.FC<CanvasProps> = ({
         {hoveredTable && !isEditing && !isWaiterDragActive && (
           <div
             className={
-              `absolute z-[10100] px-3 py-2 text-xs rounded-lg shadow-xl whitespace-normal break-words select-none border ` +
+              `absolute z-[10200] px-3 py-2 text-xs rounded-lg shadow-xl whitespace-normal break-words select-none border ` +
               (document.documentElement.getAttribute('data-theme') === 'light'
                 ? 'bg-white text-gray-900 border-gray-200'
                 : 'bg-gray-900 text-white border-gray-700')
@@ -9060,19 +10129,39 @@ const Canvas: React.FC<CanvasProps> = ({
               left: `${hoveredTable.position.x + 15}px`,
               top: `${hoveredTable.position.y + 15}px`,
               pointerEvents: 'none',
-              zIndex: 10100,
+              zIndex: 10200,
               width: 180
             }}
           >
-            <div className="font-medium text-accent flex items-center gap-1">
+            <div className="font-medium text-accent flex items-center gap-1 flex-wrap">
+              {(hoveredTable.reservation as any).__spilloverFromPrevDay ? (
+                <span
+                  className="inline-flex items-center text-blue-400"
+                  title={currentLanguage === 'srb' ? 'Nastavak iz prethodnog dana' : 'Continues from previous day'}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M7 7h7a4 4 0 0 1 4 4v6" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M7 7l4-4M7 7l4 4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              ) : null}
               {hoveredTable.reservation.guestName}
               {hoveredTable.reservation.isVip ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-yellow-500">
                   <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z"/>
                 </svg>
               ) : null}
+              {(hoveredTable.reservation as any).isEventReservation && (
+                <span className={`px-1.5 py-0.5 rounded text-[10px] border ${document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-purple-500/20 text-purple-300 border-purple-500/30'}`}>
+                  Event
+                </span>
+              )}
             </div>
-            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>{hoveredTable.reservation.time} - {hoveredTable.reservation.numberOfGuests} {t('guests')}</div>
+            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700 mt-1' : 'text-gray-300 mt-1'}>
+              {((hoveredTable.reservation as any).__spilloverFromPrevDay
+                ? ((hoveredTable.reservation as any).__spilloverSourceTime || hoveredTable.reservation.time)
+                : hoveredTable.reservation.time)} - {hoveredTable.reservation.numberOfGuests} {t('guests')}
+            </div>
             <div className={`text-xs px-2 py-1 rounded mt-1 ${
               hoveredTable.reservation.status === 'waiting' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-orange-100 text-orange-700' : 'bg-orange-500/20 text-orange-300') :
               hoveredTable.reservation.status === 'confirmed' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/20 text-blue-300') :
@@ -9080,14 +10169,16 @@ const Canvas: React.FC<CanvasProps> = ({
               hoveredTable.reservation.status === 'not_arrived' ? (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-red-100 text-red-700' : 'bg-red-500/20 text-red-300') :
               (document.documentElement.getAttribute('data-theme') === 'light' ? 'bg-gray-100 text-gray-700' : 'bg-gray-500/20 text-gray-300')
             }`}>
-              {hoveredTable.reservation.status === 'waiting' ? t('waiting') :
+              {hoveredTable.reservation.status === 'waiting' ? `Waiting - ${getWaitingRemaining(hoveredTable.reservation)}` :
                hoveredTable.reservation.status === 'confirmed' ? t('confirmed') :
-               hoveredTable.reservation.status === 'arrived' ? t('arrived') :
+               hoveredTable.reservation.status === 'arrived' ? `Seated - ${getSeatedRemaining(hoveredTable.reservation, hoveredTable.tableId)}` :
                hoveredTable.reservation.status === 'not_arrived' ? t('notArrived') :
                hoveredTable.reservation.status === 'cancelled' ? t('cancelled') :
                hoveredTable.reservation.status}
             </div>
-            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('tablesLabel')} {formatTableNames(hoveredTable.reservation.tableIds, zoneLayouts)}</div>
+            <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>
+              {t('tablesLabel')} {formatTableNames(hoveredTable.reservation.tableIds, zoneLayouts)}
+            </div>
             {hoveredTable.reservation.phone && (
               <div className={document.documentElement.getAttribute('data-theme') === 'light' ? 'text-gray-700' : 'text-gray-300'}>{t('telLabel')} {hoveredTable.reservation.phone}</div>
             )}
@@ -9167,6 +10258,7 @@ const Canvas: React.FC<CanvasProps> = ({
             return null;
           })()
         )}
+        </div>
       </div>
 
       {/* Timeline at bottom with slide animations on open/close of waiter panel */}
@@ -9178,7 +10270,7 @@ const Canvas: React.FC<CanvasProps> = ({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 80, opacity: 0 }}
             transition={{ type: 'tween', duration: 0.25 }}
-            className={`fixed left-80 right-0 bottom-0 ${isAnyModalOpen ? 'z-[950]' : 'z-[950]'}`}
+            className={`fixed left-80 right-0 bottom-0 ${isAnyModalOpen ? 'z-[120]' : 'z-[120]'}`}
           >
             <div className="relative h-20">
               <button

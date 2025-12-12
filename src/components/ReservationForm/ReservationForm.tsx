@@ -4,6 +4,7 @@ import { ZoneContext } from "../../context/ZoneContext";
 import { LayoutContext } from "../../context/LayoutContext";
 import { UserContext } from "../../context/UserContext";
 import { reservationsService } from "../../services/reservationsService";
+import { reservationAdjustmentsService } from "../../services/reservationAdjustmentsService";
 import { HexColorPicker } from "react-colorful";
 import DirectPrintService from "../../services/directPrintService";
 import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
@@ -15,6 +16,7 @@ import { guestbookService } from "../../services/guestbookService";
 import type { GuestbookEntry } from "../../types/guestbook";
 import type { Reservation } from "../../types/reservation";
 import { ThemeContext } from "../../context/ThemeContext";
+import { EventContext } from "../../context/EventContext";
 import { SERVICE_TYPE_DEFINITIONS, matchServiceTypeDefinition, parseServiceTypeTokens } from "../../constants/serviceTypes";
 import { BookOpen, Eye, EyeOff } from "lucide-react";
 
@@ -94,9 +96,10 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
   const { t, currentLanguage } = useLanguage();
   const { addReservation, updateReservation, deleteReservation, reservations, fetchReservations } = useContext(ReservationContext);
   const { zones, currentZone } = useContext(ZoneContext);
-  const { layout, zoneLayouts } = useContext(LayoutContext);
+  const { layout, zoneLayouts, savedLayouts } = useContext(LayoutContext);
   const { user } = useContext(UserContext);
   const { theme } = useContext(ThemeContext);
+  const { events, eventReservations, addEventReservation, updateEventReservation } = useContext(EventContext);
   const isLight = theme === 'light';
   const activeStatuses = useMemo(() => new Set(['waiting', 'confirmed', 'arrived']), []);
   const serviceTypeSuggestions = useMemo(() => {
@@ -111,6 +114,42 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
       description: definition.description[languageKey as 'eng' | 'srb'],
     }));
   }, [currentLanguage]);
+  // Collect all tables across ALL zones, using both working layouts (zoneLayouts)
+  // and saved layouts as a fallback. This ensures we can always match table numbers
+  // even if a zone hasn't been loaded in the current session.
+  const allTablesAcrossZones = useMemo(() => {
+    const tables: any[] = [];
+    const seenIds = new Set<string>();
+    try {
+      // 1) Working/default layouts from zoneLayouts
+      Object.values(zoneLayouts || {}).forEach((l: any) => {
+        const arr = Array.isArray(l?.tables) ? l.tables : [];
+        arr.forEach((t: any) => {
+          if (t && typeof t.id === 'string' && !seenIds.has(t.id)) {
+            seenIds.add(t.id);
+            tables.push(t);
+          }
+        });
+      });
+      // 2) Fallback to all saved layouts (for zones without default/loaded layouts)
+      Object.values((savedLayouts as any) || {}).forEach((list: any) => {
+        (list || []).forEach((sl: any) => {
+          const layout = sl?.layout;
+          const arr = Array.isArray(layout?.tables) ? layout.tables : [];
+          arr.forEach((t: any) => {
+            if (t && typeof t.id === 'string' && !seenIds.has(t.id)) {
+              seenIds.add(t.id);
+              tables.push(t);
+            }
+          });
+        });
+      });
+    } catch {
+      // In case of any unexpected shape, just return what we have so far
+    }
+    return tables;
+  }, [zoneLayouts, savedLayouts]);
+
   const suggestionButtonBase = isLight
     ? "flex items-center gap-2 rounded-lg bg-transparent text-gray-900 hover:bg-gray-50"
     : "flex items-center gap-2 rounded-lg bg-transparent text-white hover:bg-[#0B1D33]";
@@ -213,7 +252,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     month: new Date().getMonth(),
     day: new Date().getDate(), 
     hour: new Date().getHours(),
-    minute: 0,
+    minute: new Date().getMinutes(),
     numberOfGuests: 2,
     zone: '',
     tableNumbers: [] as string[],
@@ -247,6 +286,15 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
   
   // Form validation state
   const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Event transfer state - for transferring regular reservation to event
+  const [transferToEvent, setTransferToEvent] = useState(false);
+
+  // Spillover state - for extending seated reservations into the next day
+  const [extendToNextDay, setExtendToNextDay] = useState(false);
+  const [spilloverEndHour, setSpilloverEndHour] = useState(1); // Default 01:00 next day
+  const [spilloverEndMinute, setSpilloverEndMinute] = useState(0);
 
   // Guestbook suggestions
   const [guestbookEntries, setGuestbookEntries] = useState<GuestbookEntry[]>([]);
@@ -289,11 +337,68 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     return () => cancelAnimationFrame(id);
   }, [serviceDropdownOpen]);
 
-  const isArrived = !!editReservation && editReservation.status === 'arrived';
-  const isFinalized = editReservation && (editReservation.status === 'not_arrived' || editReservation.status === 'cancelled');
+  const isArrived = !!editReservation && editReservation.status === 'arrived' && !editReservation.cleared;
+  const isFinalized = editReservation && (editReservation.status === 'not_arrived' || editReservation.status === 'cancelled' || (editReservation.status === 'arrived' && editReservation.cleared));
   const isTimeLocked = isArrived;
   const isDateLocked = isArrived;
   const isNameLocked = isArrived;
+
+  // Detect overlapping event for current form date/time
+  // For seated (arrived) reservations, also allow if event exists on same date (even if reservation started before event)
+  const overlappingEvent = useMemo(() => {
+    try {
+      const year = (selectedDate || new Date()).getFullYear();
+      const monthString = (formData.month + 1).toString().padStart(2, '0');
+      const dayString = formData.day.toString().padStart(2, '0');
+      const date = `${year}-${monthString}-${dayString}`;
+      
+      const hour = typeof formData.hour === 'number' ? formData.hour : 0;
+      const minute = typeof formData.minute === 'number' ? formData.minute : 0;
+      const resStartMin = hour * 60 + minute;
+      const resEndMin = Math.min(1440, resStartMin + estimateDurationMinutes(formData.numberOfGuests));
+      
+      const zoneForReservation = formData.zone || currentZone?.id || (zones.length > 0 ? zones[0].id : '');
+      const sameDayEvents = (events || []).filter((ev) => ev.date === date);
+      
+      // For seated (arrived) reservations, find any event on the same date/zone
+      // since they might have started before the event but are still ongoing
+      if (editReservation?.status === 'arrived' && !editReservation?.cleared) {
+        const foundEvent = sameDayEvents.find((ev) => {
+          // If event is limited to zones and reservation zone isn't included, skip
+          if (Array.isArray(ev.zoneIds) && ev.zoneIds.length > 0) {
+            if (!ev.zoneIds.includes(zoneForReservation)) return false;
+          }
+          return true; // Any event on same date/zone is eligible for seated reservations
+        });
+        return foundEvent || null;
+      }
+      
+      // For non-seated reservations, check time overlap
+      const foundEvent = sameDayEvents.find((ev) => {
+        // If event is limited to zones and reservation zone isn't included, skip
+        if (Array.isArray(ev.zoneIds) && ev.zoneIds.length > 0) {
+          if (!ev.zoneIds.includes(zoneForReservation)) return false;
+        }
+        const [ehStart, emStart] = String(ev.startTime || '00:00').split(':').map(Number);
+        const [ehEnd, emEnd] = String(ev.endTime || '23:59').split(':').map(Number);
+        const evStartMin = (ehStart % 24) * 60 + (emStart % 60);
+        const evEndMin = (ehEnd % 24) * 60 + (emEnd % 60);
+        // Overlap if either start or end of reservation block intersects event window
+        return resStartMin < evEndMin && evStartMin < resEndMin;
+      });
+      
+      return foundEvent || null;
+    } catch {
+      return null;
+    }
+  }, [formData.month, formData.day, formData.hour, formData.minute, formData.numberOfGuests, formData.zone, selectedDate, events, currentZone, zones, editReservation?.status, editReservation?.cleared]);
+
+  // Reset transferToEvent when overlapping event changes
+  useEffect(() => {
+    if (!overlappingEvent) {
+      setTransferToEvent(false);
+    }
+  }, [overlappingEvent]);
 
   // Helper function to show alert modal
   const showAlert = useCallback((title: string, message: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -323,10 +428,9 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
 
     try {
       if (editReservation) {
-        // Find table numbers from table IDs - search in all zones
-        const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []);
+        // Find table numbers from table IDs - search across ALL zones/layouts
         const tableNumbers: string[] = editReservation.tableIds?.map((tableId: string) => {
-          const table = allTables.find(t => t.id === tableId);
+          const table = allTablesAcrossZones.find(t => t.id === tableId);
           return table ? (table.name || table.number?.toString() || "") : "";
         }).filter((num: string) => num !== "") || [];
         
@@ -354,7 +458,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
           month: today.getMonth(),
           day: today.getDate(), 
           hour: currentTime.getHours(),
-          minute: 0,
+          minute: currentTime.getMinutes(),
           numberOfGuests: 2,
           zone: currentZone?.id || (zones.length > 0 ? zones[0].id : ''),
           tableNumbers: [],
@@ -384,6 +488,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     setCurrentTableInput("");
     setIsEditingTime({ hour: false, minute: false });
     setValidationErrors({});
+    setFormError(null);
     // Also clear any linked VIP/guestbook state so badge doesn't persist on next open
     setSelectedGuestbookId(null);
     setFormData(prev => ({ ...prev, isVipGuest: false }));
@@ -492,6 +597,18 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     };
   }, [isOpen, initializeFormData, resetForm]);
 
+  // Listen for event to close this form when event reservation form is opening
+  useEffect(() => {
+    const handleCloseForm = () => {
+      if (isOpen) {
+        console.log('📩 Received close event from event reservation form');
+        onClose();
+      }
+    };
+    window.addEventListener('respoint-close-regular-reservation-form', handleCloseForm as any);
+    return () => window.removeEventListener('respoint-close-regular-reservation-form', handleCloseForm as any);
+  }, [isOpen, onClose]);
+
   // Re-populate form when switching between "add" and "edit" without closing the modal
   useEffect(() => {
     if (!isOpen) return;
@@ -500,9 +617,8 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     lastEditIdRef.current = currentId;
     try {
       if (editReservation) {
-        const allTables = Object.values(zoneLayouts || {}).flatMap(l => (l as any)?.tables || []) as Array<any>;
         const tableNumbers: string[] = editReservation.tableIds?.map((tableId: string) => {
-          const table = allTables.find(t => t.id === tableId);
+          const table = allTablesAcrossZones.find(t => t.id === tableId);
           return table ? (table.name || table.number?.toString() || "") : "";
         }).filter((num: string) => num !== "") || [];
         setFormData({
@@ -521,6 +637,31 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
           status: editReservation.status || 'waiting',
           isVipGuest: !!editReservation.isVip
         });
+        
+        // Check if reservation already has spillover adjustment
+        try {
+          const resDate = editReservation.date;
+          const adjKey = `respoint-duration-adjustments:${resDate}`;
+          const adjRaw = localStorage.getItem(adjKey);
+          const adjParsed = adjRaw ? JSON.parse(adjRaw) : {};
+          const adj = adjParsed[editReservation.id];
+          if (adj && typeof adj.end === 'number' && adj.end > 1440) {
+            // Reservation spills into next day
+            const spillMinutes = adj.end - 1440;
+            setExtendToNextDay(true);
+            setSpilloverEndHour(Math.floor(spillMinutes / 60));
+            setSpilloverEndMinute(spillMinutes % 60);
+          } else {
+            setExtendToNextDay(false);
+            setSpilloverEndHour(1);
+            setSpilloverEndMinute(0);
+          }
+        } catch {
+          setExtendToNextDay(false);
+          setSpilloverEndHour(1);
+          setSpilloverEndMinute(0);
+        }
+        
         setIsFormReady(true);
       } else {
         const today = selectedDate || new Date();
@@ -541,6 +682,10 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
           status: 'waiting' as const,
           isVipGuest: false
         });
+        // Reset spillover state for new reservations
+        setExtendToNextDay(false);
+        setSpilloverEndHour(1);
+        setSpilloverEndMinute(0);
         setIsFormReady(true);
       }
     } catch {}
@@ -672,14 +817,29 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
   const normalizePhone = (s?: string) => (s || '').replace(/\D+/g, '');
   const phoneQuery = normalizePhone(formData.mobileNumber);
   const existingGuest = React.useMemo(() => {
-    // Prefer phone match (>=5 digits), else exact normalized name match
+    // Find guest by phone and name separately
     const byPhone =
       phoneQuery && phoneQuery.length >= 5
         ? guestbookEntries.find(e => normalizePhone(e.phone) === phoneQuery)
         : null;
-    if (byPhone) return byPhone;
-    if (!guestNameQuery) return null;
-    const byName = guestbookEntries.find(e => normalizeText(e.name || '') === guestNameQuery);
+    const byName = guestNameQuery
+      ? guestbookEntries.find(e => normalizeText(e.name || '') === guestNameQuery)
+      : null;
+    
+    // If both phone and name are provided, they must match the same guest
+    if (byPhone && guestNameQuery) {
+      // Only return phone match if the name also matches this guest
+      if (normalizeText(byPhone.name || '') === guestNameQuery) {
+        return byPhone;
+      }
+      // Phone matches different guest than name - user is typing new guest
+      return null;
+    }
+    
+    // If only phone matches (no name entered)
+    if (byPhone && !guestNameQuery) return byPhone;
+    
+    // If only name matches
     return byName || null;
   }, [guestbookEntries, guestNameQuery, phoneQuery]);
   const handleGuestbookAction = async () => {
@@ -731,29 +891,42 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     try {
       const target = String(tableNumberOrName || '').trim();
       if (!target) return null;
+
+      // 1) Prefer working/default layouts from zoneLayouts
       for (const [zoneId, layout] of Object.entries(zoneLayouts || {})) {
         const tables = Array.isArray((layout as any)?.tables) ? (layout as any).tables : [];
         const found = tables.some((t: any) => (t?.name === target) || (String(t?.number ?? '') === target));
         if (found) return zoneId;
       }
+
+      // 2) Fallback: search through all saved layouts
+      for (const [zoneId, list] of Object.entries((savedLayouts as any) || {})) {
+        const layoutsForZone = Array.isArray(list) ? list : [];
+        for (const sl of layoutsForZone) {
+          const tables = Array.isArray(sl?.layout?.tables) ? sl.layout.tables : [];
+          const found = tables.some((t: any) => (t?.name === target) || (String(t?.number ?? '') === target));
+          if (found) return zoneId;
+        }
+      }
     } catch {}
     return null;
-  }, [zoneLayouts]);
+  }, [zoneLayouts, savedLayouts]);
 
-  // Auto-select zones based on entered table numbers
+  // Auto-select zones based on entered table numbers.
+  // We derive this purely from the numbers → zone mapping so it stays consistent
+  // with validation and with saved multi-zone reservations.
   const autoSelectedZoneIds = useMemo(() => {
     const result = new Set<string>();
     try {
       const nums = (formData.tableNumbers || []).map(n => String(n || '').trim()).filter(Boolean);
       if (nums.length === 0) return result;
-      Object.entries(zoneLayouts || {}).forEach(([zoneId, layout]) => {
-        const tables = Array.isArray((layout as any)?.tables) ? (layout as any).tables : [];
-        const matches = nums.some(num => tables.some((t: any) => (t?.name === num) || (String(t?.number ?? '') === num)));
-        if (matches) result.add(zoneId);
+      nums.forEach(num => {
+        const z = findZoneIdForTableNumber(num);
+        if (z) result.add(z);
       });
     } catch {}
     return result;
-  }, [formData.tableNumbers, zoneLayouts]);
+  }, [formData.tableNumbers, findZoneIdForTableNumber]);
 
   // If only one zone matches the entered tables and we're creating a new reservation,
   // auto-select that zone in the form
@@ -778,7 +951,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     const dedup = Array.from(new Set(tokens));
 
     // Validate against existing tables across all zones
-    const allTables = Object.values(zoneLayouts || {}).flatMap(l => (l as any)?.tables || []) as Array<any>;
+    const allTables = allTablesAcrossZones as Array<any>;
     const validNumbers = dedup.filter(n => allTables.some(t => t?.name === n || String(t?.number) === n));
 
     // Decide zone from suggested tables
@@ -797,7 +970,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
       return {
         ...prev,
         guestName: entry.name || '',
-        mobileNumber: prev.mobileNumber || entry.phone || '',
+        mobileNumber: entry.phone || '', // Always use guestbook phone when selecting guest
         tableNumbers: nextTables,
         isVipGuest: !!entry.isVip,
         zone: nextZone
@@ -917,7 +1090,14 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     }
     
     setValidationErrors(errors);
-    return Object.keys(errors).length === 0;
+    if (Object.keys(errors).length > 0) {
+      // Show first validation error in a banner (similar to event reservation form)
+      const firstKey = Object.keys(errors)[0];
+      setFormError(errors[firstKey]);
+      return false;
+    }
+    setFormError(null);
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -969,17 +1149,13 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     // or when editing non-arrived reservations. For 'arrived', allow editing other fields.
     if (!editReservation || (editReservation && editReservation.status !== 'arrived')) {
       if (reservationDateTime <= now) {
-        showAlert(
-          t('invalidDateTime'),
-          t('invalidDateTimeMessage'),
-          'error'
-        );
+        setFormError(t('invalidDateTimeMessage'));
         return;
       }
     }
     
     // Find tables by numbers across ALL zones to allow multi-zone reservations
-    const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []) as Array<any>;
+    const allTables = allTablesAcrossZones as Array<any>;
     const tableIds = formData.tableNumbers
       .map(tableNumber => {
         const table = allTables.find(t => t.name === tableNumber || t.number?.toString() === tableNumber);
@@ -990,32 +1166,213 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     console.log('🏷️ Selected table IDs:', tableIds);
       
     // VALIDATION: Check for double booking
+    // Exclude cleared reservations (guest has left)
     const otherReservations = reservations.filter(
-      r => activeStatuses.has(r.status) && !(editReservation && r.id === editReservation.id)
+      r => activeStatuses.has(r.status) && 
+           !(r.status === 'arrived' && (r as any).cleared === true) &&
+           !(editReservation && r.id === editReservation.id)
+    );
+
+    // Also check seated event reservations (arrived, not cleared)
+    const seatedEventReservations = (eventReservations || []).filter(
+      er => er.status === 'arrived' && !er.cleared
     );
 
     const adjustmentsForDate = getAdjustmentsForDate(date);
     const newStartMin = timeStringToMinutes(time);
     const newEndMin = Math.min(1440, newStartMin + estimateDurationMinutes(formData.numberOfGuests));
+    const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number) =>
+      aStart < bEnd && bStart < aEnd;
+
+    // Also block against spillover from previous day into this date (endMin > 1440)
+    const prevDateKey = (() => {
+      try {
+        const d = new Date(`${date}T00:00:00`);
+        d.setDate(d.getDate() - 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      } catch {
+        return null;
+      }
+    })();
+    const adjustmentsForPrev = prevDateKey ? getAdjustmentsForDate(prevDateKey) : {};
+
+    // When editing an existing reservation, allow saving even if it already overlaps
+    // with a conflicting reservation (e.g. seated), as long as that overlap existed before.
+    const prevEditDate = editReservation?.date;
+    const prevAdjustmentsForDate = prevEditDate ? getAdjustmentsForDate(prevEditDate) : {};
+    const prevEditRange = editReservation
+      ? getReservationRange(editReservation as Reservation, prevAdjustmentsForDate)
+      : null;
+    const prevEditTableIds: string[] = Array.isArray(editReservation?.tableIds) ? editReservation.tableIds : [];
 
     for (const tableId of tableIds) {
+      // Check spillover regular reservations from previous day
+      if (prevDateKey) {
+        const spillConflict = (reservations || []).find(r => {
+          if (r.date !== prevDateKey) return false;
+          if ((r as any).cleared) return false;
+          if (!(r.status === 'waiting' || r.status === 'confirmed' || r.status === 'arrived')) return false;
+          if (editReservation && r.id === editReservation.id) return false;
+          if (!Array.isArray(r.tableIds) || !r.tableIds.includes(tableId)) return false;
+          const rangePrev = getReservationRange(r, adjustmentsForPrev);
+          if (rangePrev.endMin <= 1440) return false;
+          const spillStart = 0;
+          const spillEnd = Math.min(1440, rangePrev.endMin - 1440);
+          return overlaps(newStartMin, newEndMin, spillStart, spillEnd);
+        });
+        if (spillConflict) {
+          const conflictingTable = allTables.find(t => t.id === tableId);
+          const message = currentLanguage === 'srb'
+            ? `Sto ${conflictingTable?.name || conflictingTable?.number || ''} je zauzet (rezervacija iz prethodnog dana) od 00:00 do ${formatMinutesToTime(Math.min(1440, (getReservationRange(spillConflict, adjustmentsForPrev).endMin - 1440)))} - ${spillConflict.guestName}`
+            : `Table ${conflictingTable?.name || conflictingTable?.number || ''} is occupied (spillover reservation) from 00:00 to ${formatMinutesToTime(Math.min(1440, (getReservationRange(spillConflict, adjustmentsForPrev).endMin - 1440)))} - ${spillConflict.guestName}`;
+          setFormError(message);
+          return;
+        }
+      }
+
+      // Check regular reservations
       const conflictingReservation = otherReservations.find(r => {
         if (r.date !== date) return false;
         if (!Array.isArray(r.tableIds) || !r.tableIds.includes(tableId)) return false;
         const range = getReservationRange(r, adjustmentsForDate);
-        return newStartMin < range.endMin && range.startMin < newEndMin;
+        return overlaps(newStartMin, newEndMin, range.startMin, range.endMin);
       });
 
       if (conflictingReservation) {
         const conflictingRange = getReservationRange(conflictingReservation, adjustmentsForDate);
+
+        // Editing exception: if this reservation already overlapped this conflict before, allow updates.
+        if (
+          editReservation &&
+          prevEditRange &&
+          prevEditDate === date &&
+          prevEditTableIds.includes(tableId) &&
+          overlaps(prevEditRange.startMin, prevEditRange.endMin, conflictingRange.startMin, conflictingRange.endMin)
+        ) {
+          // Keep checking other tables for new conflicts
+        } else {
         const conflictingTable = allTables.find(t => t.id === tableId);
         const message = `${t('tableUnavailableMessage')
           .replace('{table}', String(conflictingTable?.name || conflictingTable?.number || ''))
           .replace('{time}', `${formatMinutesToTime(conflictingRange.startMin)}-${formatMinutesToTime(conflictingRange.endMin)}`)
           .replace('{guest}', conflictingReservation.guestName)}`;
+        setFormError(message);
+        return;
+        }
+      }
+
+      // Check seated event reservations
+      const conflictingEventReservation = seatedEventReservations.find(er => {
+        if (er.date !== date) return false;
+        if (!Array.isArray(er.tableIds) || !er.tableIds.includes(tableId)) return false;
+        // Get event reservation range from adjustments
+        const adj = adjustmentsForDate?.[er.id] || {};
+        const baseStart = timeStringToMinutes(er.time);
+        const startMin = typeof adj.start === 'number' ? adj.start : baseStart;
+        const endMin = typeof adj.end === 'number' ? adj.end : Math.min(1440, startMin + estimateDurationMinutes(er.numberOfGuests));
+        return overlaps(newStartMin, newEndMin, startMin, endMin);
+      });
+
+      if (conflictingEventReservation) {
+        const adj = adjustmentsForDate?.[conflictingEventReservation.id] || {};
+        const baseStart = timeStringToMinutes(conflictingEventReservation.time);
+        const startMin = typeof adj.start === 'number' ? adj.start : baseStart;
+        const endMin = typeof adj.end === 'number' ? adj.end : Math.min(1440, startMin + estimateDurationMinutes(conflictingEventReservation.numberOfGuests));
+
+        // Editing exception: if this reservation already overlapped this event seated reservation before, allow updates.
+        if (
+          editReservation &&
+          prevEditRange &&
+          prevEditDate === date &&
+          prevEditTableIds.includes(tableId) &&
+          overlaps(prevEditRange.startMin, prevEditRange.endMin, startMin, endMin)
+        ) {
+          // allow
+        } else {
+        const conflictingTable = allTables.find(t => t.id === tableId);
+        const message = currentLanguage === 'srb'
+          ? `Sto ${conflictingTable?.name || conflictingTable?.number || ''} je zauzet (event rezervacija) od ${formatMinutesToTime(startMin)} do ${formatMinutesToTime(endMin)} - ${conflictingEventReservation.guestName}`
+          : `Table ${conflictingTable?.name || conflictingTable?.number || ''} is occupied (event reservation) from ${formatMinutesToTime(startMin)} to ${formatMinutesToTime(endMin)} - ${conflictingEventReservation.guestName}`;
+        setFormError(message);
+        return;
+        }
+      }
+    }
+
+    // HANDLE: Transfer to event OR block if overlapping event without transfer
+    if (overlappingEvent && !transferToEvent) {
+      // Block regular reservations during events if not transferring
+      const msg =
+        currentLanguage === 'srb'
+          ? `U ovom terminu postoji aktivan event "${overlappingEvent.name}". Označite opciju za prebacivanje u event ili izaberite drugi termin.`
+          : `There is an active event "${overlappingEvent.name}" during this time. Check the transfer option or choose a different time.`;
+      setFormError(msg);
+      return;
+    }
+
+    // If transferring to event, create event reservation instead
+    if (transferToEvent && overlappingEvent) {
+      try {
+        console.log('🎪 Transferring reservation to event:', overlappingEvent.name);
+        
+        // Dispatch event to trigger slide-out animation on the reservation box
+        if (editReservation?.id) {
+          window.dispatchEvent(new CustomEvent('respoint-reservation-transferring', {
+            detail: { reservationId: editReservation.id }
+          }));
+          // Wait for animation (300ms)
+          await new Promise(resolve => setTimeout(resolve, 350));
+        }
+        
+        // Determine if reservation was seated (arrived)
+        const wasSeated = formData.status === 'arrived' || editReservation?.status === 'arrived';
+        
+        // Create event reservation with proper table IDs (not names)
+        const createdEventReservation = await addEventReservation({
+          eventId: overlappingEvent.id,
+          guestName: formData.guestName,
+          date: date,
+          time: time,
+          numberOfGuests: formData.numberOfGuests,
+          zoneId: formData.zone || currentZone?.id || (zones.length > 0 ? zones[0].id : ''),
+          tableIds: tableIds, // These are already table IDs (not names)
+          color: formData.tableColor,
+          isVip: formData.isVipGuest,
+          notes: formData.serviceType + (formData.additionalRequirements ? '\n' + formData.additionalRequirements : ''),
+          phone: formData.mobileNumber,
+          paymentStatus: 'not_required',
+        });
+        
+        // If the original was seated (arrived), update the event reservation status to 'arrived'
+        if (wasSeated && createdEventReservation?.id) {
+          console.log('🪑 Updating event reservation status to arrived (seated)');
+          await updateEventReservation(createdEventReservation.id, { status: 'arrived' });
+        }
+        
+        // If editing an existing regular reservation, delete it
+        if (editReservation) {
+          console.log('🗑️ Deleting original regular reservation:', editReservation.id);
+          await deleteReservation(editReservation.id);
+        }
+        
+        // Dispatch complete event to clear animation state
+        window.dispatchEvent(new CustomEvent('respoint-reservation-transfer-complete'));
+        
+        console.log('✅ Reservation transferred to event successfully');
+        onClose();
+        return;
+      } catch (error) {
+        console.error('❌ Error transferring reservation to event:', error);
+        // Dispatch complete event to clear animation state even on error
+        window.dispatchEvent(new CustomEvent('respoint-reservation-transfer-complete'));
         showAlert(
-          t('tableUnavailable'),
-          message,
+          currentLanguage === 'srb' ? 'Greška' : 'Error',
+          currentLanguage === 'srb' 
+            ? 'Greška pri prebacivanju rezervacije u event.'
+            : 'Error transferring reservation to event.',
           'error'
         );
         return;
@@ -1044,6 +1401,30 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
         console.log('✏️ Updating existing reservation:', editReservation.id);
         await updateReservation(editReservation.id, reservationData);
         console.log('✅ Reservation updated successfully');
+
+        // If extending seated reservation into next day, save the spillover adjustment
+        if (isArrived && extendToNextDay) {
+          const startMin = timeStringToMinutes(editReservation.time);
+          // End time is in the next day: 1440 + (hours * 60 + minutes)
+          const spilloverEndMin = 1440 + (spilloverEndHour * 60) + spilloverEndMinute;
+          
+          try {
+            await reservationAdjustmentsService.upsertAdjustment(date, editReservation.id, {
+              start: startMin,
+              end: spilloverEndMin
+            });
+            // Also update localStorage for immediate effect
+            const key = `respoint-duration-adjustments:${date}`;
+            const raw = localStorage.getItem(key);
+            const parsed = raw ? JSON.parse(raw) : {};
+            parsed[editReservation.id] = { start: startMin, end: spilloverEndMin };
+            localStorage.setItem(key, JSON.stringify(parsed));
+            window.dispatchEvent(new CustomEvent('respoint-duration-adjustments-changed', { detail: { date } }));
+            console.log('✅ Spillover adjustment saved:', { start: startMin, end: spilloverEndMin });
+          } catch (adjErr) {
+            console.error('❌ Error saving spillover adjustment:', adjErr);
+          }
+        }
       } else {
         console.log('➕ Creating new reservation');
         await addReservation(reservationData);
@@ -1129,7 +1510,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
   const handleClearNow = async () => {
     if (!editReservation) return;
     try {
-      await updateReservation(editReservation.id, { status: 'cancelled', cleared: true } as any);
+      await updateReservation(editReservation.id, { status: 'arrived', cleared: true } as any);
       await fetchReservations();
       onClose();
     } catch (error) {
@@ -1148,20 +1529,42 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     
     let reservationData;
     
+    // Helper to get zone name or "Merged Zones" for print
+    const getZoneNameForPrint = (tableIds: string[]): string | undefined => {
+      if (!tableIds || tableIds.length === 0) return undefined;
+      const zoneIdsSet = new Set<string>();
+      tableIds.forEach((tableId) => {
+        const zId = findZoneIdForTableNumber(tableId);
+        if (zId) zoneIdsSet.add(zId);
+      });
+      if (zoneIdsSet.size > 1) {
+        return currentLanguage === 'srb' ? 'Spojene zone' : 'Merged Zones';
+      }
+      if (zoneIdsSet.size === 1) {
+        const zoneId = Array.from(zoneIdsSet)[0];
+        return zones.find(z => z.id === zoneId)?.name;
+      }
+      return undefined;
+    };
+    
     if (editReservation) {
       // For editing mode, use existing reservation data
+      const tableNames = editReservation.tableIds?.map((tableId: string) => {
+        const table = allTablesAcrossZones.find(t => t.id === tableId);
+        return table ? (table.name || table.number?.toString() || "") : "";
+      }) || [];
+      // Detect multi-zone from table names
+      const zoneName = getZoneNameForPrint(tableNames) || zones.find(z => z.id === editReservation.zoneId)?.name;
+      
       reservationData = {
         guestName: editReservation.guestName,
         date: editReservation.date,
         time: editReservation.time,
         numberOfGuests: editReservation.numberOfGuests,
-        tableNumber: editReservation.tableIds?.map((tableId: string) => {
-          const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []);
-          const table = allTables.find(t => t.id === tableId);
-          return table ? (table.name || table.number?.toString() || "") : "";
-        }).join(', ') || "",
+        tableNumber: tableNames.join(', ') || "",
         serviceType: localizeServiceType(editReservation.notes),
         additionalRequirements: editReservation.email,
+        zoneName,
         restaurantName: user?.restaurantName,
         restaurantAddress: user?.address,
         logoUrl: user?.printLogoUrl || user?.logo
@@ -1171,6 +1574,18 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
       const date = `${new Date().getFullYear()}-${(formData.month + 1).toString().padStart(2, '0')}-${formData.day.toString().padStart(2, '0')}`;
       const time = `${Number(formData.hour).toString().padStart(2, '0')}:${Number(formData.minute).toString().padStart(2, '0')}`;
       
+      // Detect multi-zone from table numbers
+      let zoneName: string | undefined;
+      if (autoSelectedZoneIds.size > 1) {
+        zoneName = currentLanguage === 'srb' ? 'Spojene zone' : 'Merged Zones';
+      } else if (autoSelectedZoneIds.size === 1) {
+        const zoneId = Array.from(autoSelectedZoneIds)[0];
+        zoneName = zones.find(z => z.id === zoneId)?.name;
+      } else {
+        const newZone = zones.find(z => z.id === (formData.zone || currentZone?.id));
+        zoneName = newZone?.name;
+      }
+      
       reservationData = {
         guestName: formData.guestName,
         date: date,
@@ -1179,6 +1594,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
         tableNumber: formData.tableNumbers.join(', '),
         serviceType: localizeServiceType(formData.serviceType),
         additionalRequirements: formData.additionalRequirements,
+        zoneName,
         restaurantName: user?.restaurantName,
         restaurantAddress: user?.address,
         logoUrl: user?.printLogoUrl || user?.logo
@@ -1323,10 +1739,89 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
       return; 
     }
 
-    const allTables = Object.values(zoneLayouts || {}).flatMap(l => l.tables || []);
-    const tableExists = allTables.some(t => t.name === newTableNumber || t.number?.toString() === newTableNumber);
+    const allTables = allTablesAcrossZones as Array<any>;
+    const tableObj = allTables.find(t => t.name === newTableNumber || t.number?.toString() === newTableNumber);
+    const tableExists = !!tableObj;
 
     if (tableExists) {
+      // For seated (arrived) reservations, check if this table has upcoming reservations
+      if (isArrived && editReservation) {
+        const tableId = tableObj.id;
+        const reservationDate = editReservation.date;
+        
+        // Get current seated reservation's end time from adjustments
+        const adjustmentsKey = `respoint-duration-adjustments:${reservationDate}`;
+        let currentAdjustments: Record<string, { start?: number; end?: number }> = {};
+        try {
+          const raw = localStorage.getItem(adjustmentsKey);
+          if (raw) currentAdjustments = JSON.parse(raw);
+        } catch {}
+        
+        const currentReservationAdj = currentAdjustments[editReservation.id] || {};
+        const currentStartMin = currentReservationAdj.start ?? timeStringToMinutes(editReservation.time);
+        const currentEndMin = currentReservationAdj.end ?? Math.min(1440, currentStartMin + estimateDurationMinutes(editReservation.numberOfGuests));
+        
+        // Find reservations on this table that would conflict
+        const conflictingReservation = reservations.find(r => {
+          if (r.id === editReservation.id) return false; // Skip self
+          if (r.date !== reservationDate) return false;
+          if (!(r.status === 'waiting' || r.status === 'confirmed')) return false;
+          if (!Array.isArray(r.tableIds) || !r.tableIds.includes(tableId)) return false;
+          
+          // Check if this reservation starts before our current end
+          const adj = currentAdjustments[r.id] || {};
+          const rStartMin = adj.start ?? timeStringToMinutes(r.time);
+          return rStartMin < currentEndMin && rStartMin > currentStartMin;
+        });
+        
+        // Also check event reservations
+        const conflictingEventReservation = !conflictingReservation ? eventReservations.find(er => {
+          if (er.date !== reservationDate) return false;
+          if (!(er.status === 'booked')) return false;
+          if (!Array.isArray(er.tableIds) || !er.tableIds.includes(tableId)) return false;
+          
+          const adj = currentAdjustments[er.id] || {};
+          const erStartMin = adj.start ?? timeStringToMinutes(er.time);
+          return erStartMin < currentEndMin && erStartMin > currentStartMin;
+        }) : null;
+        
+        const conflict = conflictingReservation || conflictingEventReservation;
+        
+        if (conflict) {
+          const conflictAdj = currentAdjustments[conflict.id] || {};
+          const conflictStartMin = conflictAdj.start ?? timeStringToMinutes(conflict.time);
+          const conflictStartTime = formatMinutesToTime(conflictStartMin);
+          
+          // Store table-specific limit
+          const tableLimitsKey = `respoint-table-limits:${reservationDate}`;
+          let tableLimits: Record<string, Record<string, number>> = {};
+          try {
+            const raw = localStorage.getItem(tableLimitsKey);
+            if (raw) tableLimits = JSON.parse(raw);
+          } catch {}
+          
+          if (!tableLimits[editReservation.id]) tableLimits[editReservation.id] = {};
+          tableLimits[editReservation.id][tableId] = conflictStartMin;
+          
+          try {
+            localStorage.setItem(tableLimitsKey, JSON.stringify(tableLimits));
+            // Notify other components
+            window.dispatchEvent(new CustomEvent('respoint-table-limits-changed', {
+              detail: { date: reservationDate, reservationId: editReservation.id, tableId, endMin: conflictStartMin }
+            }));
+          } catch {}
+          
+          // Show info message
+          showAlert(
+            currentLanguage === 'srb' ? 'Sto dodat sa ograničenjem' : 'Table added with limit',
+            currentLanguage === 'srb' 
+              ? `Sto ${newTableNumber} je dodat, ali će biti seated samo do ${conflictStartTime} jer je tada rezervisan za "${conflict.guestName}".`
+              : `Table ${newTableNumber} has been added, but will only be seated until ${conflictStartTime} as it's reserved for "${conflict.guestName}" then.`,
+            'info'
+          );
+        }
+      }
+      
       // Determine zone for this table and for the full set after adding
       const zoneForNew = findZoneIdForTableNumber(newTableNumber);
       const finalNumbers = [...formData.tableNumbers, newTableNumber];
@@ -1524,51 +2019,125 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
 
                               {/* Right Column */}
               <div className="space-y-3 min-w-0">
-                {editReservation.email && (
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('notes')}</label>
-                      <div className="px-3 py-2 bg-[#0A1929] border border-gray-800 rounded text-sm text-white min-h-[200px]">
-                        {editReservation.email || t('noAdditionalNotes')}
-                      </div>
-                    </div>
-                  )}
+                {/* Status details box – mirror Event Reservation finalized view */}
+                {(() => {
+                  const isNotArrivedFinal = editReservation.status === 'not_arrived';
+                  const isCancelledFinal =
+                    editReservation.status === 'cancelled' && !editReservation.cleared;
+                  const isArrivedFinal =
+                    editReservation.status === 'arrived' ||
+                    (editReservation.status === 'cancelled' && editReservation.cleared === true);
 
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-yellow-400">
-                        <path d="m21,5l-3,16l-6,-3l-6,3l3,-16z"/>
-                      </svg>
-                      <span className="text-yellow-400 font-medium">{t('finalizedReservation')}</span>
+                  if (isArrivedFinal) {
+                    return (
+                      <div className="bg-green-500/10 border border-green-500/20 rounded p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="text-green-400"
+                          >
+                            <polyline points="20,6 9,17 4,12" />
+                          </svg>
+                          <span className="text-green-400 font-medium">
+                            {currentLanguage === 'srb' ? 'Završena rezervacija' : 'Completed Reservation'}
+                          </span>
+                        </div>
+                        <p className="text-green-500/80 text-sm">
+                          {currentLanguage === 'srb'
+                            ? 'Gost je stigao i uspešno napustio restoran. Rezervacija je završena.'
+                            : 'Guest arrived and successfully left the restaurant. Reservation is completed.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  if (isNotArrivedFinal) {
+                    return (
+                      <div className="bg-red-500/10 border border-red-500/20 rounded p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="text-red-400"
+                          >
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                          <span className="text-red-400 font-medium">
+                            {currentLanguage === 'srb' ? 'Gost nije stigao' : 'Guest Did Not Arrive'}
+                          </span>
+                        </div>
+                        <p className="text-red-500/80 text-sm">
+                          {currentLanguage === 'srb'
+                            ? 'Gost nije stigao na rezervaciju u dogovoreno vreme.'
+                            : 'Guest did not arrive for the reservation at the scheduled time.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  if (isCancelledFinal) {
+                    return (
+                      <div className="bg-gray-500/10 border border-gray-500/20 rounded p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="text-gray-400"
+                          >
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                          <span className="text-gray-400 font-medium">
+                            {currentLanguage === 'srb' ? 'Otkazana rezervacija' : 'Cancelled Reservation'}
+                          </span>
+                        </div>
+                        <p className="text-gray-500/80 text-sm">
+                          {currentLanguage === 'srb'
+                            ? 'Ova rezervacija je otkazana i ne može se menjati.'
+                            : 'This reservation has been cancelled and cannot be modified.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
+
+                {editReservation.email && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{t('notes')}</label>
+                    <div className="px-3 py-2 bg-[#0A1929] border border-gray-800 rounded text-sm text-white min-h-[200px]">
+                      {editReservation.email || t('noAdditionalNotes')}
                     </div>
-                    <p className="text-yellow-500/80 text-sm">
-                      {t('finalizedReservationDesc')}
-                    </p>
                   </div>
-                </div>
+                )}
+              </div>
               </div>
             </div>
 
-            {/* Action buttons - Clear for arrived, Delete otherwise */}
+            {/* Action buttons - Delete for all finalized reservations */}
             <div className="px-6 py-3 border-t border-gray-800 flex-shrink-0">
               <div className="flex gap-3 justify-between">
                 <div className="flex gap-3">
-                  {editReservation.status === 'arrived' ? (
-                    <button
-                      type="button"
-                      onClick={handleClearNow}
-                      className="px-3 py-1.5 text-red-400 text-sm rounded hover:bg-red-500/10 transition-colors"
-                    >
-                      Clear
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleDelete}
-                      className="px-3 py-1.5 text-red-400 text-sm rounded hover:bg-red-500/10 transition-colors"
-                    >
-                      {t('deleteReservation')}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    className="px-3 py-1.5 text-red-400 text-sm rounded hover:bg-red-500/10 transition-colors"
+                  >
+                    {t('deleteReservation')}
+                  </button>
                   <button
                     type="button"
                     onClick={handleDirectPrint}
@@ -1674,7 +2243,160 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
               className="flex flex-col flex-1 min-h-0 overflow-hidden transition-all duration-800 ease-in-out"
               style={seeThrough ? { pointerEvents: 'none', filter: 'blur(2px)' } : undefined}
             >
- 	            <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 statistics-scrollbar stable-scrollbar transition-all duration-800 ease-in-out">
+	            <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 statistics-scrollbar stable-scrollbar transition-all duration-800 ease-in-out">
+              {formError && (
+                <div className="mb-3 rounded border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {formError}
+                </div>
+              )}
+              
+              {/* Event transfer option - shown when reservation time overlaps with an event */}
+              {overlappingEvent && !isFinalized && (
+                <div 
+                  className={`mb-4 rounded-lg border p-3 transition-all duration-300 ${
+                    transferToEvent 
+                      ? 'border-purple-500/60 bg-gradient-to-r from-purple-500/10 to-pink-500/10' 
+                      : 'border-blue-500/40 bg-blue-500/5'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <label className="relative flex items-center cursor-pointer mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={transferToEvent}
+                        onChange={(e) => {
+                          setTransferToEvent(e.target.checked);
+                          if (e.target.checked) setFormError(null);
+                        }}
+                        className="sr-only"
+                      />
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-200 ${
+                        transferToEvent 
+                          ? 'bg-gradient-to-r from-purple-500 to-pink-500 border-purple-500' 
+                          : isLight ? 'border-gray-400 bg-white' : 'border-gray-600 bg-gray-900'
+                      }`}>
+                        {transferToEvent && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </div>
+                    </label>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${transferToEvent ? 'text-purple-300' : isLight ? 'text-gray-700' : 'text-gray-200'}`}>
+                        {currentLanguage === 'srb' 
+                          ? 'Prebaci rezervaciju u Event tab' 
+                          : 'Transfer reservation to Event tab'}
+                      </p>
+                      <div className={`mt-1 text-xs ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-purple-400">
+                              <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            <span className="font-medium text-purple-400">{overlappingEvent.name}</span>
+                          </span>
+                          <span className="text-gray-500">•</span>
+                          <span>{overlappingEvent.startTime} - {overlappingEvent.endTime}</span>
+                        </div>
+                      </div>
+                      {transferToEvent && (
+                        <p className={`mt-2 text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                          {currentLanguage === 'srb'
+                            ? '✨ Rezervacija će biti prebačena u event nakon čuvanja'
+                            : '✨ Reservation will be transferred to event after saving'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Spillover option - shown for seated (arrived) reservations */}
+              {isArrived && !isFinalized && (
+                <div 
+                  className={`mb-4 rounded-lg border p-3 transition-all duration-300 ${
+                    extendToNextDay 
+                      ? 'border-blue-500/60 bg-gradient-to-r from-blue-500/10 to-cyan-500/10' 
+                      : isLight ? 'border-gray-300 bg-gray-50' : 'border-gray-700 bg-gray-800/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <label className="relative flex items-center cursor-pointer mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={extendToNextDay}
+                        onChange={(e) => setExtendToNextDay(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-200 ${
+                        extendToNextDay 
+                          ? 'bg-gradient-to-r from-blue-500 to-cyan-500 border-blue-500' 
+                          : isLight ? 'border-gray-400 bg-white' : 'border-gray-600 bg-gray-900'
+                      }`}>
+                        {extendToNextDay && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </div>
+                    </label>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${extendToNextDay ? 'text-blue-300' : isLight ? 'text-gray-700' : 'text-gray-200'}`}>
+                        {currentLanguage === 'srb' 
+                          ? 'Produži rezervaciju u sutrašnji dan' 
+                          : 'Extend reservation into next day'}
+                      </p>
+                      <p className={`mt-0.5 text-xs ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {currentLanguage === 'srb'
+                          ? 'Rezervacija će trajati preko ponoći'
+                          : 'Reservation will extend past midnight'}
+                      </p>
+                      
+                      {extendToNextDay && (
+                        <div className="mt-3 flex items-center gap-2">
+                          <span className={`text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                            {currentLanguage === 'srb' ? 'Završava u' : 'Ends at'}:
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={spilloverEndHour}
+                              onChange={(e) => setSpilloverEndHour(Number(e.target.value))}
+                              className={`px-2 py-1 text-sm rounded border ${
+                                isLight 
+                                  ? 'bg-white border-gray-300 text-gray-700' 
+                                  : 'bg-gray-900 border-gray-600 text-white'
+                              } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                            >
+                              {[0, 1, 2, 3, 4, 5, 6].map(h => (
+                                <option key={h} value={h}>{h.toString().padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                            <span className={isLight ? 'text-gray-600' : 'text-gray-400'}>:</span>
+                            <select
+                              value={spilloverEndMinute}
+                              onChange={(e) => setSpilloverEndMinute(Number(e.target.value))}
+                              className={`px-2 py-1 text-sm rounded border ${
+                                isLight 
+                                  ? 'bg-white border-gray-300 text-gray-700' 
+                                  : 'bg-gray-900 border-gray-600 text-white'
+                              } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                            >
+                              {[0, 15, 30, 45].map(m => (
+                                <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <span className={`text-xs ${isLight ? 'text-gray-500' : 'text-gray-500'}`}>
+                            ({currentLanguage === 'srb' ? 'sutra' : 'tomorrow'})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Left Column */}
                 <div className="space-y-3 min-w-0">
@@ -1703,6 +2425,8 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
                             if (validationErrors.guestName) {
                               setValidationErrors(prev => ({ ...prev, guestName: '' }));
                             }
+                            // Show guest suggestions when typing
+                            setShowGuestSuggestions(true);
                           }
                         }}
                         onFocus={() => {
@@ -1832,7 +2556,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
                           </svg>
                         </button>
                         <span className="text-white font-medium text-xs min-w-[30px] text-center">
-                          {formData.day}th
+                          {currentLanguage === 'srb' ? `${formData.day}.` : `${formData.day}th`}
                         </span>
                         <button
                           type="button"
@@ -2329,10 +3053,18 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
                       (!existingGuest && (isNameLocked || !String(formData.guestName || '').trim()))
                     }
                     className="px-3 py-1.5 text-gray-300 text-sm rounded hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={existingGuest ? 'View Guest Profile' : 'Add to Guestbook'}
+                    title={
+                      existingGuest
+                        ? (currentLanguage === 'srb' ? 'Profil gosta' : 'View Guest Profile')
+                        : (currentLanguage === 'srb' ? 'Dodaj u knjigu gostiju' : 'Add to Guestbook')
+                    }
                   >
                     <BookOpen size={14} strokeWidth={2} />
-                    <span>{existingGuest ? 'View Guest Profile' : 'Add to Guestbook'}</span>
+                    <span>
+                      {existingGuest
+                        ? (currentLanguage === 'srb' ? 'Profil gosta' : 'View Guest Profile')
+                        : (currentLanguage === 'srb' ? 'Dodaj u knjigu gostiju' : 'Add to Guestbook')}
+                    </span>
                   </button>
                 </div>
                 <div className="flex gap-3">

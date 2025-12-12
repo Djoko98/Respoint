@@ -462,38 +462,16 @@ export const reservationsService = {
       throw new Error("User ID is required for fetching analytics reservations");
     }
     
-    // First try to get reservations with zone names using LEFT JOIN
-    let { data, error } = await supabase
+    // Simple query without PostgREST JOIN to avoid 400 errors when FK is missing
+    const { data, error } = await supabase
       .from('reservations')
-      .select(`
-        *,
-        zones:zone_id (
-          name
-        )
-      `)
+      .select('*')
       .eq('user_id', userId)
       .gte('date', startDate)
       .lte('date', endDate)
-      // Do NOT filter out soft deleted for analytics - we want ALL historical data for statistics
+      // Do NOT filter out soft deleted for analytics - we want ALL historical data
       .order('date', { ascending: false })
       .order('time', { ascending: false });
-
-    // If JOIN fails, fallback to simple query
-    if (error) {
-      console.warn('📊 JOIN with zones failed, falling back to simple query:', error);
-      const fallbackResult = await supabase
-        .from('reservations')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        // Do NOT filter out soft deleted for analytics - we want ALL historical data
-        .order('date', { ascending: false })
-        .order('time', { ascending: false });
-      
-      data = fallbackResult.data;
-      error = fallbackResult.error;
-    }
     
     if (error) {
       console.error('❌ Supabase error fetching analytics reservations:', error);
@@ -505,10 +483,7 @@ export const reservationsService = {
     // Get zone names if not already included
     let zoneNamesMap: { [key: string]: string } = {};
     
-    // Check if we have zone data from JOIN
-    const hasZoneData = data?.some((r: any) => r.zones && r.zones.name);
-    
-    if (!hasZoneData && data && data.length > 0) {
+    if (data && data.length > 0) {
       // Get unique zone IDs
       const zoneIds = [...new Set(data.map((r: any) => r.zone_id).filter(Boolean))];
       

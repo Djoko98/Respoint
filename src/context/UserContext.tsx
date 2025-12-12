@@ -74,12 +74,18 @@ const normalizeRoleConfig = (rawConfig: any, profile?: any): RoleConfigEntry[] =
 const hasPinForRoleId = (roles: RoleConfigEntry[], targetId: string) =>
   Boolean(roles.find((role) => role.id === targetId && role.pinHash));
 
+interface LoginResult {
+  success: boolean;
+  reason?: "invalid_password" | "unknown";
+  message?: string;
+}
+
 interface UserContextType {
   user: User | null;
   isAuthenticated: boolean;
   activeRole: UserRole | null;
   setActiveRole: (role: UserRole | null) => void;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<LoginResult>;
   signup: (email: string, password: string, name: string, restaurantName: string) => Promise<{ success: boolean; requiresEmailConfirmation?: boolean; error?: string }>;
   logout: () => void;
   setUser: (user: User | null) => void;
@@ -90,7 +96,7 @@ export const UserContext = createContext<UserContextType>({
   isAuthenticated: false,
   activeRole: null,
   setActiveRole: () => {},
-  login: async () => false,
+  login: async () => ({ success: false, reason: "unknown" }),
   signup: async () => ({ success: false }),
   logout: () => {},
   setUser: () => {},
@@ -300,17 +306,12 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
       }
-      
-      // CRITICAL: Only set authInitialized to true if we don't have a network error
-      // If we have network error, the app should stay in error state
-      if (!networkError) {
-        console.log('✅ Auth initialization completed successfully (timestamp:', Date.now(), ')');
-        setLoading(false);
-        setAuthInitialized(true);
-      } else {
-        console.log('🚫 Auth initialization completed with network error - staying in error state (timestamp:', Date.now(), ')');
-        // Don't change loading/authInitialized state - keep showing error
-      }
+
+      // At this point we've either successfully initialized auth
+      // or handled the error paths above (including early return when nema interneta).
+      console.log('✅ Auth initialization finished (timestamp:', Date.now(), ')');
+      setLoading(false);
+      setAuthInitialized(true);
       setIsInitializing(false);
     }
   };
@@ -328,6 +329,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!isMounted) return;
 
         try {
+          if (event === 'PASSWORD_RECOVERY') {
+            // Supabase je poslao link za reset lozinke i korisnik je otvorio aplikaciju.
+            // Obavesti App da treba da prikaže modal za unos nove lozinke.
+            try { window.dispatchEvent(new CustomEvent('respoint-password-recovery')); } catch {}
+            return;
+          }
+
           if (event === 'SIGNED_OUT') {
             setUser(null);
             // Clear active role on logout
@@ -548,6 +556,18 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
         console.log('✅ UserContext: Setting existing user with profile:', existingUser);
         setUser(existingUser);
+
+        // Best-effort backfill email kolone u profiles ako nedostaje
+        try {
+          if (!profile.email && session.user.email) {
+            await supabase
+              .from('profiles')
+              .update({ email: session.user.email })
+              .eq('id', session.user.id);
+          }
+        } catch (emailUpdateError) {
+          console.warn('⚠️ Could not backfill profiles.email column:', emailUpdateError);
+        }
       }
     } catch (error) {
       console.error('❌ Unexpected error in fetchUserProfile:', error);
@@ -573,24 +593,37 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
     try {
-      console.log('🔐 Attempting login for:', email);
+      const normalizedEmail = email.trim().toLowerCase();
+      console.log('🔐 Attempting login for:', normalizedEmail);
+
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: normalizedEmail,
         password,
       });
-      
-      if (error) {
-        console.error("❌ Error logging in:", error.message);
-        return false;
+
+      if (!error) {
+        console.log('✅ Login successful, session will be handled by auth listener');
+        return { success: true };
       }
-      
-      console.log('✅ Login successful, session will be handled by auth listener');
-      return true;
-    } catch (error) {
+
+      console.error("❌ Error logging in:", error.message);
+      const msg = (error.message || '').toLowerCase();
+      const isInvalidCreds = msg.includes('invalid login credentials');
+
+      return {
+        success: false,
+        reason: isInvalidCreds ? "invalid_password" : "unknown",
+        message: "Pogrešan email ili lozinka. Pokušajte ponovo.",
+      };
+    } catch (error: any) {
       console.error('❌ Login exception:', error);
-      return false;
+      return {
+        success: false,
+        reason: "unknown",
+        message: "Došlo je do greške pri logovanju. Pokušajte ponovo.",
+      };
     }
   };
 

@@ -1,6 +1,7 @@
 import React, { useState, useContext } from "react";
 import { UserContext } from "../../context/UserContext";
 import { useLanguage } from "../../context/LanguageContext";
+import { authService } from "../../services/authService";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -16,6 +17,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
+  const [passwordAttempts, setPasswordAttempts] = useState(0);
+  const [lastAttemptEmail, setLastAttemptEmail] = useState<string | null>(null);
+  const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   
   // GLOBAL MODAL INPUT LOCK FIX: Delayed modal content rendering
   const [showModalContent, setShowModalContent] = useState(false);
@@ -59,8 +64,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
     setIsLoading(true);
 
     try {
-      const success = await login(email, password);
-      if (success) {
+      const result = await login(email, password);
+      if (result.success) {
         // Zatvori modal odmah nakon uspešnog login-a
         setTimeout(() => {
           onClose();
@@ -68,14 +73,62 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
           setPassword("");
           setValidationErrors({});
           setIsLoading(false);
+          setPasswordAttempts(0);
+          setLastAttemptEmail(null);
         }, 100); // Mali delay da korisnik vidi da je uspešno
       } else {
-        setError("Invalid email or password");
         setIsLoading(false);
+
+        if (result.reason === "email_not_found") {
+          setValidationErrors(prev => ({
+            ...prev,
+            email: result.message || "Ovaj email ne postoji u sistemu. Proverite da li ste ga tačno uneli.",
+          }));
+          setError("");
+          setPasswordAttempts(0);
+          setLastAttemptEmail(null);
+          return;
+        }
+
+        setLastAttemptEmail(prevEmail => {
+          const isSameEmail = prevEmail === email;
+          const newAttempts = isSameEmail ? passwordAttempts + 1 : 1;
+          setPasswordAttempts(newAttempts);
+
+          if (newAttempts > 2 && (result.reason === "invalid_password" || result.reason === "unknown")) {
+            setError("Lozinka je netačna. Možete je resetovati koristeći opciju ispod.");
+          } else {
+            setError(result.message || "Pogrešan email ili lozinka. Pokušajte ponovo.");
+          }
+
+          return email;
+        });
       }
     } catch (err) {
       setError("An error occurred. Please try again.");
       setIsLoading(false);
+    }
+  };
+
+  const handleSendResetPassword = async () => {
+    if (!email.trim()) {
+      setValidationErrors(prev => ({
+        ...prev,
+        email: t('emailRequired'),
+      }));
+      return;
+    }
+
+    setIsSendingResetEmail(true);
+    const result = await authService.resetPassword(email);
+
+    if (result.success) {
+      setError(result.message || "Email za resetovanje lozinke je poslat.");
+      setResetEmailSent(true);
+      setIsSendingResetEmail(false);
+    } else {
+      setError(result.error || "Greška pri slanju emaila za resetovanje lozinke.");
+      setIsSendingResetEmail(false);
     }
   };
 
@@ -100,6 +153,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
+                  setError("");
+                  setPasswordAttempts(0);
                   if (validationErrors.email) {
                     setValidationErrors(prev => ({ ...prev, email: '' }));
                   }
@@ -126,6 +181,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
+                  setError("");
                   if (validationErrors.password) {
                     setValidationErrors(prev => ({ ...prev, password: '' }));
                   }
@@ -145,6 +201,26 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSign
             {error && (
               <p className="text-red-500 text-sm">{error}</p>
             )}
+
+          {passwordAttempts > 2 && (
+            <div className="mt-2 text-xs text-gray-400">
+              <p className="mb-2">
+                Ako ste zaboravili lozinku za ovaj email, možete je resetovati klikom na dugme ispod.
+              </p>
+              <button
+                type="button"
+                onClick={handleSendResetPassword}
+                disabled={isSendingResetEmail || resetEmailSent}
+                className="inline-flex items-center px-3 py-1.5 rounded-full border border-accent text-accent hover:bg-gray-800 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSendingResetEmail
+                  ? "Slanje emaila..."
+                  : resetEmailSent
+                  ? "Email je poslat"
+                  : "Resetuj lozinku"}
+              </button>
+            </div>
+          )}
 
             <button
               type="submit"

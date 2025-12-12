@@ -8,6 +8,9 @@ ORDER BY column_name;
 
 -- Add missing columns one by one (ignore errors if column already exists)
 
+-- Add email column so we can validate login email existence on the client
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email TEXT;
+
 -- Add logo column (essential for logo functionality)
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS logo TEXT;
 

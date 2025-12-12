@@ -95,7 +95,8 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
       case 'warning':
         return 'bg-yellow-600 hover:bg-yellow-700 text-white';
       case 'info':
-        return 'bg-blue-600 hover:bg-blue-700 text-white';
+        // Match Account Settings "Save" ghost button style
+        return 'text-blue-400 hover:bg-blue-500/10';
       case 'success':
         return 'text-green-400 hover:bg-green-500/10 transition-colors font-medium';
       default:
@@ -104,7 +105,7 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[15000] flex items-center justify-center p-4">
       <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-md overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
@@ -132,7 +133,7 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
             <button
               data-ok-button
               onClick={onClose}
-              className={`px-6 py-2 text-sm rounded transition-colors font-medium ${getConfirmButtonStyles()}`}
+            className={`px-4 py-2 text-sm rounded transition-colors font-medium ${getConfirmButtonStyles()}`}
             >
               {t('ok')}
             </button>

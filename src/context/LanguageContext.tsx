@@ -22,6 +22,7 @@ export interface Translations {
   reservationDate: string;
   reservationTime: string;
   notes: string;
+  type: string;
   selectTable: string;
   save: string;
   
@@ -110,6 +111,9 @@ export interface Translations {
   reservations: string;
   noDataAvailable: string;
   topTablesTitle: string;
+  topZonesTitle: string;
+  topWaitersTitle: string;
+  topLoyaltyTitle: string;
   monthlyOverview: string;
   reservationTrends: string;
   dailyOverview: string;
@@ -129,6 +133,7 @@ export interface Translations {
   notArrivedLabel: string;
   cancelledLabel: string;
   noReservationsThisMonth: string;
+  noReservationsEntered: string;
   noTableDataAvailable: string;
   allReservations: string;
   allReservationsDescription: string;
@@ -179,6 +184,11 @@ export interface Translations {
   saveRequired: string;
   saveBeforeSwitchingZones: string;
   saveBeforeManagingZones: string;
+
+  // Layout delete confirmations
+  deleteLayout: string;
+  deleteLayoutMessage: string;
+  deleteLayoutButton: string;
   
   // Calendar
   today: string;
@@ -363,6 +373,7 @@ export interface Translations {
   closed: string;
   name: string;
   table: string;
+  mergedZones: string;
   booked: string;
   seated: string;
   cleared: string;
@@ -448,6 +459,14 @@ export interface Translations {
   // Color / Table color
   tableColor: string;
   chooseTableColor: string;
+
+  // Updates / Updater
+  checkForUpdates: string;
+  checkForUpdatesDescription: string;
+  updateAvailableTitle: string;
+  updateAvailableBody: string;
+  noUpdateTitle: string;
+  noUpdateBody: string;
 }
 
 const englishTranslations: Translations = {
@@ -490,6 +509,8 @@ const englishTranslations: Translations = {
   preferences: 'Preferences',
   advancedOptions: 'Advanced Options',
   saveChanges: 'Save Changes',
+  checkForUpdates: 'Check for updates',
+  checkForUpdatesDescription: 'Manually check if a new desktop update is available.',
   
   // Restaurant Info
   restaurantName: 'Restaurant Name',
@@ -555,6 +576,9 @@ const englishTranslations: Translations = {
   clearHistoryButton: 'Clear All Data',
   keepHistory: 'Keep History',
   topTablesTitle: 'Top Tables',
+  topZonesTitle: 'Top Zones',
+  topWaitersTitle: 'Top Waiters',
+  topLoyaltyTitle: 'Top Loyalty Guests',
   monthlyOverview: 'Monthly Overview',
   reservationTrends: 'Reservation Trends',
   dailyOverview: 'Daily Overview',
@@ -578,13 +602,14 @@ const englishTranslations: Translations = {
   notArrivedLabel: 'Not Arrived',
   cancelledLabel: 'Cancelled',
   noReservationsThisMonth: 'No reservations for this month',
+  noReservationsEntered: 'No reservations entered yet',
   noTableDataAvailable: 'No table data available',
   allReservations: 'All Reservations',
   allReservationsDescription: 'This table shows all historical reservations including deleted ones for complete statistics tracking.',
+  type: 'Type',
   phone: 'Phone',
   status: 'Status',
   zone: 'Zone',
-  notes: 'Notes',
   deleted: '(deleted)',
   noStatisticsAvailable: 'No statistics available',
   createReservationsToSeeAnalytics: 'Create some reservations to see analytics',
@@ -629,6 +654,11 @@ const englishTranslations: Translations = {
   saveRequired: 'Save Required',
   saveBeforeSwitchingZones: 'Please save or cancel your changes before switching zones.',
   saveBeforeManagingZones: 'Please save or cancel your changes before managing zones.',
+  
+  // Layout delete confirmations
+  deleteLayout: 'Delete Layout',
+  deleteLayoutMessage: 'Are you sure you want to delete this layout? This will not delete any reservations, only the table arrangement.',
+  deleteLayoutButton: 'Delete Layout',
   
   // Calendar
   today: 'Today',
@@ -728,6 +758,10 @@ const englishTranslations: Translations = {
   footerLine2Label: 'Footer line 2',
   saveFooter: 'Save footer',
   editFooter: 'Edit footer',
+  updateAvailableTitle: 'Update available',
+  updateAvailableBody: 'You have new Update - Update Now',
+  noUpdateTitle: 'Up to date',
+  noUpdateBody: 'There are no updates available',
   
   // Confirmation Messages
   deleteConfirmation: 'Are you sure you want to delete this item?',
@@ -813,6 +847,7 @@ const englishTranslations: Translations = {
   closed: 'Closed',
   name: 'Name',
   table: 'Table',
+  mergedZones: 'Merged Zones',
   booked: 'BOOKED',
   seated: 'SEATED',
   cleared: 'CLEARED',
@@ -941,6 +976,8 @@ const serbianTranslations: Translations = {
   preferences: 'Podešavanja',
   advancedOptions: 'Napredne opcije',
   saveChanges: 'Sačuvaj izmene',
+  checkForUpdates: 'Proveri ažuriranja',
+  checkForUpdatesDescription: 'Ručno proveri da li je dostupno novo ažuriranje aplikacije.',
   
   // Restaurant Info
   restaurantName: 'Naziv restorana',
@@ -1005,16 +1042,14 @@ const serbianTranslations: Translations = {
   clearHistoryMessage: 'Ovo će trajno obrisati svu istoriju rezervacija i statistike. Ova radnja se ne može poništiti.',
   clearHistoryButton: 'Obriši sve podatke',
   keepHistory: 'Zadrži istoriju',
-  thisWeek: 'Ova nedelja',
-  thisMonth: 'Ovaj mesec',
   guests: 'Gosti',
   arrived: 'Stigli',
-  notArrived: 'Nisu stigli',
-  cancelled: 'Otkazano',
   reservations: 'Rezervacija',
   noDataAvailable: 'Nema dostupnih podataka',
-  noReservationsToday: 'Nema rezervacija za danas',
   topTablesTitle: 'Najtraženiji stolovi',
+  topZonesTitle: 'Najtraženije zone',
+  topWaitersTitle: 'Najtraženiji konobari',
+  topLoyaltyTitle: 'Top loyalty gosti',
   monthlyOverview: 'Mesečni pregled',
   reservationTrends: 'Trendovi rezervacija',
   dailyOverview: 'Dnevni pregled',
@@ -1034,14 +1069,14 @@ const serbianTranslations: Translations = {
   notArrivedLabel: 'Nisu stigli',
   cancelledLabel: 'Otkazano',
   noReservationsThisMonth: 'Nema rezervacija za ovaj mesec',
+  noReservationsEntered: 'Nema unetih rezervacija',
   noTableDataAvailable: 'Nema podataka o stolovima',
   allReservations: 'Sve rezervacije',
   allReservationsDescription: 'Ova tabela prikazuje sve istorijske rezervacije uključujući i obrisane radi kompletnog praćenja statistika.',
-  guestName: 'Ime gosta',
+  type: 'Tip',
   phone: 'Telefon',
   status: 'Status',
   zone: 'Zona',
-  notes: 'Napomene',
   deleted: '(obrisano)',
   noStatisticsAvailable: 'Nema dostupnih statistika',
   createReservationsToSeeAnalytics: 'Napravite neke rezervacije da vidite analitiku',
@@ -1086,6 +1121,11 @@ const serbianTranslations: Translations = {
   saveRequired: 'Potrebno je čuvanje',
   saveBeforeSwitchingZones: 'Molimo sačuvajte ili otkažite vaše izmene pre prebacivanja zone.',
   saveBeforeManagingZones: 'Molimo sačuvajte ili otkažite vaše izmene pre upravljanja zonama.',
+  
+  // Layout delete confirmations
+  deleteLayout: 'Obriši raspored',
+  deleteLayoutMessage: 'Da li ste sigurni da želite da obrišete ovaj raspored? Ovo neće obrisati rezervacije, već samo šemu stolova.',
+  deleteLayoutButton: 'Obriši raspored',
   
   // Calendar
   today: 'Danas',
@@ -1185,6 +1225,10 @@ const serbianTranslations: Translations = {
   footerLine2Label: 'Druga linija',
   saveFooter: 'Sačuvaj footer',
   editFooter: 'Uredi footer',
+  updateAvailableTitle: 'Dostupno ažuriranje',
+  updateAvailableBody: 'Dostupna je nova verzija – Ažuriraj sada.',
+  noUpdateTitle: 'Ažurirano',
+  noUpdateBody: 'Trenutno nema dostupnih ažuriranja.',
   
   // Confirmation Messages
   deleteConfirmation: 'Da li ste sigurni da želite da obrišete ovu stavku?',
@@ -1270,6 +1314,7 @@ const serbianTranslations: Translations = {
   closed: 'Zatvoreno',
   name: 'Ime',
   table: 'Stolovi',
+  mergedZones: 'Spojene zone',
   booked: 'REZERVACIJE',
   seated: 'Smešteni',
   cleared: 'Završeno',

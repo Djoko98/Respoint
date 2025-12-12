@@ -1,7 +1,8 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import { LayoutProvider } from './context/LayoutContext';
 import { ReservationContext } from './context/ReservationContext';
-import { ReservationProvider, Reservation } from './context/ReservationContext';
+import { ReservationProvider } from './context/ReservationContext';
+import { EventProvider, EventContext } from './context/EventContext';
 import { UserProvider, UserContext } from './context/UserContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { ZoneProvider } from './context/ZoneContext';
@@ -16,18 +17,19 @@ import { supabase } from './utils/supabaseClient';
 import { syncAssignedWaitersFromServer, syncAllAssignedWaitersFromServer } from './utils/waiters';
 import ZoneTabs from './components/ZoneTabs/ZoneTabs';
 import AuthDebug from './components/Debug/AuthDebug';
-import LogoTest from './components/Debug/LogoTest';
 import TitleBar from './components/TitleBar/TitleBar';
-import Statistics from './components/Statistics/Statistics';
 import AccountSettings from './components/AccountSettings/AccountSettings';
 import Subscribe from './components/Subscribe/Subscribe';
 import EmailConfirmationModal from './components/Auth/EmailConfirmationModal';
 import RoleUnlockModal from './components/Auth/RoleUnlockModal';
+import ResetPasswordModal from './components/Auth/ResetPasswordModal';
 import logoImage from './assets/logo.png';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ThemeProvider } from './context/ThemeContext';
-import { notificationService } from './services/notificationService';
-import { updaterService } from './services/updaterService';
+import { ThemeContext, ThemeProvider } from './context/ThemeContext';
+import { updaterService, AvailableUpdateHandle } from './services/updaterService';
+import UpdateAvailableModal from './components/Updates/UpdateAvailableModal';
+import { authService } from './services/authService';
+import { initDeepLinkListener } from './services/deepLinkService';
 
 const PREFILL_KEY = 'respoint_reservation_prefill';
 
@@ -41,14 +43,33 @@ declare global {
 type ViewType = 'canvas' | 'dashboard' | 'statistics';
 
 const AppContent: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, currentLanguage } = useLanguage();
   const { isAuthenticated, login, signup, activeRole, user, setActiveRole } = useContext(UserContext);
   const { reservations } = useContext(ReservationContext);
+  const { theme } = useContext(ThemeContext);
+  const { fetchEventsByDate } = useContext(EventContext);
   useEventReattacher(); // Use the event reattacher hook
+
+  // Enable F12 and Ctrl+Shift+I to open DevTools
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+        e.preventDefault();
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('plugin:webview|internal_toggle_devtools');
+        } catch (err) {
+          console.log('DevTools toggle not available:', err);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   const [selectedTool, setSelectedTool] = useState<'select' | 'table' | 'wall' | 'text' | 'chair' | 'delete'>('select');
   const [tableType, setTableType] = useState<'rectangle' | 'circle'>('rectangle');
   const [showReservationForm, setShowReservationForm] = useState(false);
-  const [editReservation, setEditReservation] = useState<Reservation | null>(null);
+  const [editReservation, setEditReservation] = useState<any | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentView, setCurrentView] = useState<ViewType>("canvas");
   const [showAccountSettings, setShowAccountSettings] = useState(false);
@@ -61,6 +82,10 @@ const AppContent: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginValidationErrors, setLoginValidationErrors] = useState<{[key: string]: string}>({});
+  const [loginPasswordAttempts, setLoginPasswordAttempts] = useState(0);
+  const [lastLoginEmailAttempt, setLastLoginEmailAttempt] = useState<string | null>(null);
+  const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   
   // Signup form states
   const [signupEmail, setSignupEmail] = useState('');
@@ -72,10 +97,14 @@ const AppContent: React.FC = () => {
   const [signupValidationErrors, setSignupValidationErrors] = useState<{[key: string]: string}>({});
   const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
   const [confirmationEmail, setConfirmationEmail] = useState('');
+  const [confirmationPassword, setConfirmationPassword] = useState('');
   const [showRoleUnlock, setShowRoleUnlock] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; notes?: string | null } | null>(null);
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdateHandle | null>(null);
+  const [hasDismissedUpdateForSession, setHasDismissedUpdateForSession] = useState(false);
+  const lastSystemDateRef = useRef<string>(new Date().toDateString());
 
-  // Check for auth confirmation in URL
+  // Check for auth confirmation in URL (web fallback)
   useEffect(() => {
     // Check if we have auth confirmation in the URL
     const checkAuthConfirmation = async () => {
@@ -100,6 +129,51 @@ const AppContent: React.FC = () => {
     
     checkAuthConfirmation();
   }, [isAuthenticated]);
+
+  // Initialize deep link listener for handling email verification from desktop app
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null;
+    
+    const setupDeepLinkListener = async () => {
+      unlistenFn = await initDeepLinkListener(
+        // On auth success
+        (type) => {
+          console.log('✅ Deep link auth success:', type);
+          
+          if (type === 'signup' || type === 'email_confirmation') {
+            // Email verified successfully - user should now be logged in automatically
+            // The Supabase auth state change listener will handle the rest
+            console.log('📧 Email verified via deep link! User should be logged in automatically.');
+          } else if (type === 'recovery') {
+            // Password recovery - show password reset modal
+            console.log('🔑 Password recovery via deep link');
+            window.dispatchEvent(new CustomEvent('respoint-password-recovery'));
+          }
+        },
+        // On auth error
+        (error) => {
+          console.error('❌ Deep link auth error:', error);
+          setWelcomeView('login');
+          setLoginError(`Verification failed: ${error}`);
+        }
+      );
+    };
+    
+    setupDeepLinkListener();
+    
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // Listen for Supabase password recovery event and open reset modal
+  useEffect(() => {
+    const handler = () => setShowPasswordResetModal(true);
+    window.addEventListener('respoint-password-recovery', handler);
+    return () => window.removeEventListener('respoint-password-recovery', handler);
+  }, []);
 
   // Initial sync of assigned waiters after login/startup so other devices pull existing assignments
   useEffect(() => {
@@ -148,28 +222,64 @@ const AppContent: React.FC = () => {
     setShowRoleUnlock(true);
   }, [isAuthenticated, activeRole, user?.id, roleSignature, setActiveRole]);
 
-  // Check for updates right after successful login
+  // Restore per-session dismissal flag for update UI
   useEffect(() => {
-    (async () => {
-      if (!isAuthenticated) return;
-      const handle = await updaterService.checkForUpdate();
-      if (handle) {
-        setUpdateInfo({ version: handle.version, notes: handle.notes });
-      } else {
-        setUpdateInfo(null);
+    try {
+      const flag = sessionStorage.getItem('respoint_update_dismissed');
+      if (flag === '1') {
+        setHasDismissedUpdateForSession(true);
       }
-    })();
-  }, [isAuthenticated]);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
-  // Also check for updates on app start (before login) so the prompt appears on the welcome screen
+  // Check for app updates once on startup (UI handled via UpdateAvailableModal; actual install happens on click)
   useEffect(() => {
     (async () => {
-      const handle = await updaterService.checkForUpdate();
-      if (handle) {
-        setUpdateInfo({ version: handle.version, notes: handle.notes });
+      console.log("APP: Starting update check from App.tsx...");
+      try {
+        const handle = await updaterService.checkForUpdate();
+        console.log("APP: Update check result:", handle);
+        if (handle) {
+          console.log("APP: Update available! Version:", handle.version);
+          setAvailableUpdate(handle);
+        } else {
+          console.log("APP: No update available or check returned null");
+          setAvailableUpdate(null);
+        }
+      } catch (err) {
+        console.error("APP: Update check failed with error:", err);
+        setAvailableUpdate(null);
       }
     })();
   }, []);
+
+  // Automatically jump header calendar to today's date when the day changes
+  useEffect(() => {
+    const checkForDateChange = () => {
+      const now = new Date();
+      const nowStr = now.toDateString();
+      if (nowStr !== lastSystemDateRef.current) {
+        // System day has rolled over
+        const selectedStr = selectedDate.toDateString();
+        // If user je bio na "starom" današnjem datumu, prebaci ga na novi današnji dan
+        if (selectedStr === lastSystemDateRef.current) {
+          setSelectedDate(now);
+        }
+        lastSystemDateRef.current = nowStr;
+      }
+    };
+
+    // Provera jednom u minutu je sasvim dovoljna
+    const intervalId = window.setInterval(checkForDateChange, 60 * 1000);
+    return () => window.clearInterval(intervalId);
+  }, [selectedDate]);
+
+  // Sync Event list with currently selected date
+  useEffect(() => {
+    void fetchEventsByDate(selectedDate);
+  }, [selectedDate, fetchEventsByDate]);
 
   // Auto-zoom for small screens to preserve desktop layout without reflow (applies only to content area, not TitleBar)
   useEffect(() => {
@@ -218,10 +328,65 @@ const AppContent: React.FC = () => {
     }
     
     setLoginLoading(true);
-    const success = await login(loginEmail, loginPassword);
-    if (!success) {
-      setLoginError('Invalid email or password');
+
+    const result = await login(loginEmail, loginPassword);
+
+    if (result.success) {
       setLoginLoading(false);
+      setLoginPasswordAttempts(0);
+      setLastLoginEmailAttempt(null);
+      return;
+    }
+
+    setLoginLoading(false);
+
+    // Ako Supabase/DB kažu da email ne postoji – prikaži poruku ispod email polja
+    if (result.reason === 'email_not_found') {
+      setLoginValidationErrors(prev => ({
+        ...prev,
+        email: result.message || 'Ovaj email ne postoji u sistemu. Proverite da li ste ga tačno uneli.',
+      }));
+      setLoginError('');
+      setLoginPasswordAttempts(0);
+      setLastLoginEmailAttempt(null);
+      return;
+    }
+
+    // Pogrešna lozinka ili generična greška – brojimo pokušaje po email adresi
+    setLastLoginEmailAttempt(prevEmail => {
+      const isSameEmail = prevEmail === loginEmail;
+      const newAttempts = isSameEmail ? loginPasswordAttempts + 1 : 1;
+      setLoginPasswordAttempts(newAttempts);
+
+      if (newAttempts > 2 && (result.reason === 'invalid_password' || result.reason === 'unknown')) {
+        setLoginError('Lozinka je netačna. Možete je resetovati koristeći opciju ispod.');
+      } else {
+        setLoginError(result.message || 'Pogrešan email ili lozinka. Pokušajte ponovo.');
+      }
+
+      return loginEmail;
+    });
+  };
+
+  const handleSendResetPassword = async () => {
+    if (!loginEmail.trim()) {
+      setLoginValidationErrors(prev => ({
+        ...prev,
+        email: t('emailRequired'),
+      }));
+      return;
+    }
+
+    setIsSendingResetEmail(true);
+    const result = await authService.resetPassword(loginEmail);
+
+    if (result.success) {
+      setLoginError(result.message || 'Email za resetovanje lozinke je poslat.');
+      setResetEmailSent(true);
+      setIsSendingResetEmail(false);
+    } else {
+      setLoginError(result.error || 'Greška pri slanju emaila za resetovanje lozinke.');
+      setIsSendingResetEmail(false);
     }
   };
 
@@ -263,6 +428,7 @@ const AppContent: React.FC = () => {
       setSignupLoading(false);
     } else if (result.requiresEmailConfirmation) {
       setConfirmationEmail(signupEmail);
+      setConfirmationPassword(signupPassword); // Sačuvaj password za automatski login
       setShowEmailConfirmation(true);
       setSignupLoading(false);
       setSignupEmail('');
@@ -276,6 +442,7 @@ const AppContent: React.FC = () => {
 
   const handleEmailConfirmed = () => {
     setShowEmailConfirmation(false);
+    setConfirmationPassword(''); // Očisti password iz memorije
   };
 
   const handleAddTable = (type: 'rectangle' | 'circle') => {
@@ -283,11 +450,26 @@ const AppContent: React.FC = () => {
     setSelectedTool('table');
   };
 
-  const handleOpenReservationForm = (reservation?: Reservation) => {
+  const handleOpenReservationForm = (reservation?: any) => {
     console.log('🚀 Opening reservation form...');
+    try {
+      window.dispatchEvent(
+        new CustomEvent('respoint-open-regular-reservation-form')
+      );
+    } catch {}
     setEditReservation(reservation || null);
     setShowReservationForm(true);
   };
+
+  // When event reservation modal opens, close regular reservation form
+  useEffect(() => {
+    const handler = () => {
+      setShowReservationForm(false);
+      setEditReservation(null);
+    };
+    window.addEventListener('respoint-open-event-reservation-form', handler as any);
+    return () => window.removeEventListener('respoint-open-event-reservation-form', handler as any);
+  }, []);
 
   // Open reservation form when requested globally (e.g., from Guestbook)
   useEffect(() => {
@@ -355,27 +537,26 @@ const AppContent: React.FC = () => {
     return () => { if (channel) try { supabase.removeChannel(channel); } catch {} };
   }, [user?.id]);
 
+  const handleDismissUpdateForSession = () => {
+    setHasDismissedUpdateForSession(true);
+    try {
+      sessionStorage.setItem('respoint_update_dismissed', '1');
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   return (
     <div className="flex flex-col h-full w-full bg-primary">
-      {/* Bottom-left update prompt */}
-      {updateInfo && (
-        <div className="fixed left-4 bottom-4 z-50">
-          <div className="px-3 py-2 rounded-md bg-[#0A1929] border border-gray-800 shadow-lg text-sm text-gray-200 flex items-center gap-2">
-            <span>Nova verzija {updateInfo.version} je dostupna.</span>
-            <button
-              className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500"
-              onClick={async () => {
-                const handle = await updaterService.checkForUpdate();
-                if (handle) {
-                  await notificationService.requestPermission();
-                  try { await handle.downloadAndInstall(); } catch {}
-                }
-              }}
-            >
-              Ažuriraj sada
-            </button>
-          </div>
-        </div>
+      {/* Update Modal (uses Tauri updater under the hood) */}
+      {availableUpdate && !hasDismissedUpdateForSession && (
+        <UpdateAvailableModal
+          isOpen={true}
+          version={availableUpdate.version}
+          notes={availableUpdate.notes}
+          onInstall={availableUpdate.downloadAndInstall}
+          onLater={handleDismissUpdateForSession}
+        />
       )}
       <AuthDebug />
       
@@ -390,8 +571,6 @@ const AppContent: React.FC = () => {
               onAddReservation={() => handleOpenReservationForm()}
               selectedDate={selectedDate}
               onEditReservation={handleOpenReservationForm}
-              currentView={currentView}
-              onViewChange={setCurrentView}
             />
             
             {/* Right side with Zone Tabs and Canvas */}
@@ -404,7 +583,7 @@ const AppContent: React.FC = () => {
               </div>
 
               {/* Canvas area */}
-              <div className="relative flex flex-1">
+              <div id="canvas-overlay-root" className="relative flex flex-1">
                 <CanvasErrorBoundary>
                   <Canvas 
                     selectedTool={selectedTool}
@@ -565,6 +744,22 @@ const AppContent: React.FC = () => {
                           {loginError}
                         </div>
                       )}
+
+                      {/* Forgot password link - always visible */}
+                      <div className="mb-4 text-right">
+                        <button
+                          type="button"
+                          onClick={handleSendResetPassword}
+                          disabled={isSendingResetEmail || resetEmailSent || !loginEmail.trim()}
+                          className="text-xs text-[#3B82F6] hover:text-[#60A5FA] hover:underline disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {isSendingResetEmail
+                            ? 'Sending...'
+                            : resetEmailSent
+                            ? '✓ Email sent!'
+                            : 'Forgot password?'}
+                        </button>
+                      </div>
 
                       <button
                         type="submit"
@@ -759,14 +954,24 @@ const AppContent: React.FC = () => {
       <EmailConfirmationModal
         isOpen={showEmailConfirmation}
         email={confirmationEmail}
+        password={confirmationPassword}
         onConfirmed={handleEmailConfirmed}
-        onClose={() => setShowEmailConfirmation(false)}
+        onClose={() => {
+          setShowEmailConfirmation(false);
+          setConfirmationPassword(''); // Očisti password iz memorije
+        }}
       />
 
       {/* Role Unlock Modal */}
       <RoleUnlockModal
         isOpen={showRoleUnlock}
         onClose={() => setShowRoleUnlock(false)}
+      />
+
+      {/* Password Reset Modal */}
+      <ResetPasswordModal
+        isOpen={showPasswordResetModal}
+        onClose={() => setShowPasswordResetModal(false)}
       />
     </div>
   );
@@ -776,22 +981,25 @@ function App() {
   return (
     <ThemeProvider>
       <FocusProvider>
-        <UserProvider>
-          <LanguageProvider>
-          <ZoneProvider>
-            <ReservationProvider>
-              <LayoutProvider>
-                <div className="flex flex-col h-full bg-[#010A16]">
-                  <TitleBar />
-                  <div id="app-zoom-root" className="flex-1 min-h-0 overflow-hidden">
-                    <AppContent />
-                  </div>
-                </div>
-              </LayoutProvider>
-            </ReservationProvider>
-          </ZoneProvider>
-          </LanguageProvider>
-        </UserProvider>
+        <div className="flex flex-col h-full bg-[#010A16]">
+          {/* Title bar is always visible, even while UserProvider shows loading screens */}
+          <TitleBar />
+          <UserProvider>
+            <LanguageProvider>
+              <ZoneProvider>
+                <ReservationProvider>
+                  <EventProvider>
+                    <LayoutProvider>
+                      <div id="app-zoom-root" className="flex-1 min-h-0 overflow-hidden">
+                        <AppContent />
+                      </div>
+                    </LayoutProvider>
+                  </EventProvider>
+                </ReservationProvider>
+              </ZoneProvider>
+            </LanguageProvider>
+          </UserProvider>
+        </div>
       </FocusProvider>
     </ThemeProvider>
   );

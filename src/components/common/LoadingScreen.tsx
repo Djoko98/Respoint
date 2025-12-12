@@ -16,13 +16,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   networkError = null,
   onRetry,
   onReset,
-  variant = 'split-logo',
+  variant = 'rail-bounce',
   animationSpeed = 'smooth'
 }) => {
-  // During connection testing, prefer the new logo rail animation unless explicitly overridden
-  const activeVariant: NonNullable<LoadingScreenProps['variant']> = isTestingNetwork
-    ? 'rail-bounce'
-    : (variant || 'split-logo');
+  // Always use the new rail-bounce logo animation for both "Connecting" and "Loading ResPoint"
+  const activeVariant: NonNullable<LoadingScreenProps['variant']> = 'rail-bounce';
   const getAnimationClass = () => {
     switch (animationSpeed) {
       case 'gentle':
@@ -171,22 +169,24 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
                 {/* Moving circle (brand dot) aligned to the right of the rail */}
                 <motion.circle
-                  cx="172"
-                  cy="56"
-                  r="36"
+                  cx={172}
+                  cy={56}
+                  r={36}
                   fill="url(#accentGradient)"
+                  initial={{ cy: 56 }}
                   animate={{ cy: [56, 200, 56] }}
                   transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
                 />
 
                 {/* Matching glow following the same motion */}
                 <motion.circle
-                  cx="172"
-                  cy="56"
-                  r="36"
+                  cx={172}
+                  cy={56}
+                  r={36}
                   fill="url(#accentGradient)"
                   filter="url(#softGlow)"
                   opacity="0.5"
+                  initial={{ cy: 56 }}
                   animate={{ cy: [56, 200, 56] }}
                   transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
                 />

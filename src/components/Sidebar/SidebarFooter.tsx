@@ -11,13 +11,15 @@ import { useRolePermissions } from "../../hooks/useRolePermissions";
 
 interface SidebarFooterProps {
   onAddReservation: () => void;
+  isEventMode?: boolean;
+  isAddDisabled?: boolean;
 }
 
 const STORAGE_KEY = "respoint_waiters";
 
 interface WaiterItem { id?: string; name: string }
 
-const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
+const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation, isEventMode, isAddDisabled }) => {
   const { user } = useContext(UserContext);
   const { hasPermission } = useRolePermissions();
   const canManageWaiters = hasPermission('manage_waiters');
@@ -365,10 +367,56 @@ const SidebarFooter: React.FC<SidebarFooterProps> = ({ onAddReservation }) => {
       {/* Centered plus button */}
       <button
         aria-label="Add reservation"
-        className="w-12 h-12 rounded-full border-2 border-[#FFB800] text-[#FFB800] flex items-center justify-center hover:bg-[#FFB800] hover:text-[#0A1929] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/60 absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2"
+        disabled={!!isAddDisabled}
+        className={
+          `group w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 focus:outline-none absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 ` +
+          (isEventMode
+            ? isAddDisabled
+              ? 'bg-gradient-to-r from-[#8066D7] via-[#D759BE] via-[#3773EA] to-[#8137EA] p-[2px] opacity-40 cursor-not-allowed'
+              : 'bg-gradient-to-r from-[#8066D7] via-[#D759BE] via-[#3773EA] to-[#8137EA] p-[2px] focus:ring-2 focus:ring-[#D759BE]/60'
+            : isAddDisabled
+            ? 'border-2 border-gray-600 text-gray-500 opacity-40 cursor-not-allowed'
+            : 'border-2 border-[#FFB800] text-[#FFB800] hover:bg-[#FFB800] hover:text-[#0A1929] focus:ring-2 focus:ring-[#FFB800]/60')
+        }
         onClick={onAddReservation}
       >
-        <Plus size={20} strokeWidth={2} />
+        {isEventMode ? (
+          <div
+            className="w-full h-full rounded-full flex items-center justify-center bg-[#000814] transition-all duration-200 group-hover:bg-gradient-to-r group-hover:from-[#8066D7] group-hover:via-[#D759BE] group-hover:via-[#3773EA] group-hover:to-[#8137EA]"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="transition-all duration-200 group-hover:stroke-[#000814]"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              stroke="url(#eventPlusGradient)"
+            >
+              <defs>
+                <linearGradient
+                  id="eventPlusGradient"
+                  x1="0"
+                  y1="12"
+                  x2="24"
+                  y2="12"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop stopColor="#8066D7" />
+                  <stop offset="0.28" stopColor="#D759BE" />
+                  <stop offset="0.73" stopColor="#3773EA" />
+                  <stop offset="0.99" stopColor="#8137EA" />
+                </linearGradient>
+              </defs>
+              <line x1="12" y1="6" x2="12" y2="18" />
+              <line x1="6" y1="12" x2="18" y2="12" />
+            </svg>
+          </div>
+        ) : (
+          <Plus size={20} strokeWidth={2} />
+        )}
       </button>
 
       {/* Waiter button at 75% (disabled for waiter role) */}

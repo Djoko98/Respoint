@@ -107,6 +107,26 @@ export interface Table {
     circleStartDeg?: number; // starting angle offset in degrees
     circleVariant?: 'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU';
     circleVariants?: Array<'standard' | 'barstool' | 'booth' | 'boothCurved' | 'boothU'>;
+    // Global chair sizing & spacing (applied unless overridden per seat/corner)
+    chairWidthPx?: number;
+    chairHeightPx?: number;
+    chairSpacingPx?: number;
+    // Optional per-seat size overrides by side (index-aligned with seat order)
+    topSeatSizes?: Array<{ w?: number; h?: number }>;
+    rightSeatSizes?: Array<{ w?: number; h?: number }>;
+    bottomSeatSizes?: Array<{ w?: number; h?: number }>;
+    leftSeatSizes?: Array<{ w?: number; h?: number }>;
+    // Optional explicit corner sizes
+    cornerTLWidthPx?: number;
+    cornerTLHeightPx?: number;
+    cornerTRWidthPx?: number;
+    cornerTRHeightPx?: number;
+    cornerBRWidthPx?: number;
+    cornerBRHeightPx?: number;
+    cornerBLWidthPx?: number;
+    cornerBLHeightPx?: number;
+    // Optional per-seat size overrides for circular tables
+    circleSeatSizes?: Array<{ w?: number; h?: number }>;
   };
 }
 
@@ -189,7 +209,7 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const { currentZone, zones } = useContext(ZoneContext);
   const { user } = useContext(UserContext);
   const [isEditingInternal, setIsEditingInternal] = useState(false);
-  const [currentLayoutId, setCurrentLayoutId] = useState<string | null>(null);
+  const [currentLayoutIds, setCurrentLayoutIds] = useState<{ [zoneId: string]: string | null }>({});
   const [savedLayouts, setSavedLayouts] = useState<SavedLayoutsMap>({});
   const [zoneLayouts, setZoneLayoutsInternal] = useState<ZoneLayouts>({});
   const [layoutAtEditStart, setLayoutAtEditStart] = useState<Layout | null>(null);
@@ -212,6 +232,7 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Define layout first
   const layout = currentZone ? (undoRedoLayouts[currentZone.id] || emptyLayout) : emptyLayout;
+  const currentLayoutId = currentZone ? currentLayoutIds[currentZone.id] || null : null;
 
   // Calculate hasChanges
   const hasChanges = isEditingInternal && layoutAtEditStart !== null && 
@@ -319,17 +340,20 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         resetUndoRedo(cleanedUndoRedoLayouts);
       }
       
-      // Clean up saved layouts for deleted zones
+      // Clean up saved layouts and current layout ids for deleted zones
       const savedLayoutsToClean = Object.keys(savedLayouts).filter(zoneId => !activeZoneIds.has(zoneId));
       if (savedLayoutsToClean.length > 0) {
         const cleanedSavedLayouts = { ...savedLayouts };
+        const cleanedCurrentIds = { ...currentLayoutIds };
         savedLayoutsToClean.forEach(zoneId => {
           delete cleanedSavedLayouts[zoneId];
+          delete cleanedCurrentIds[zoneId];
         });
         setSavedLayouts(cleanedSavedLayouts);
+        setCurrentLayoutIds(cleanedCurrentIds);
       }
     }
-  }, [zones, zoneLayouts, undoRedoLayouts, savedLayouts, resetUndoRedo]);
+  }, [zones, zoneLayouts, undoRedoLayouts, savedLayouts, currentLayoutIds, resetUndoRedo]);
 
   // Add window focus event listener to refresh layouts when app comes back to focus
   useEffect(() => {
@@ -434,14 +458,22 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     debounceTimer.current = setTimeout(async () => {
       if (!user?.id) return;
       
-      // Check if layout exists for this zone
-      const { data: existing } = await supabase
+      // Check if layout exists for this zone.
+      // We intentionally avoid .single() here to prevent 406 errors when no row exists.
+      const { data: existingRows, error: selectError } = await supabase
         .from('layouts')
         .select('id')
         .eq('user_id', user.id)
         .eq('zone_id', zoneId)
         .eq('is_active', true)
-        .single();
+        .limit(1);
+
+      if (selectError) {
+        console.error('Error checking existing layout:', selectError);
+        return;
+      }
+
+      const existing = Array.isArray(existingRows) && existingRows.length > 0 ? existingRows[0] : null;
       
       if (existing) {
         // Update existing layout
@@ -496,57 +528,76 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return zoneSavedLayouts.find(l => l.is_default) || zoneSavedLayouts[0] || null;
   }, [currentZone, savedLayouts]);
 
-  // Always load default layout when switching to a zone
-  useEffect(() => {
-    if (currentZone && !isEditingInternal) {
-      const defaultLayout = getDefaultLayout();
-      if (defaultLayout) {
-        // Always load the default layout when entering a zone
-        setUndoRedoState({
-          ...zoneLayouts,
-          [currentZone.id]: defaultLayout.layout
-        });
-        // Set the current layout ID to the default layout
-        setCurrentLayoutId(defaultLayout.id);
-        // Reset layoutAtEditStart to prevent showing unsaved changes
-        setLayoutAtEditStart(null);
-        console.log(`Loading default layout "${defaultLayout.name}" for zone ${currentZone.name}`);
-      } else {
-        // If no default layout exists, ensure we start with empty layout
-        setUndoRedoState({
-          ...zoneLayouts,
-          [currentZone.id]: emptyLayout
-        });
-        setCurrentLayoutId(null);
-        // Reset layoutAtEditStart to prevent showing unsaved changes
-        setLayoutAtEditStart(null);
-        console.log(`No default layout found for zone ${currentZone.name}, using empty layout`);
-      }
-    }
-  }, [currentZone?.id, isEditingInternal]); // Re-run when zone changes or when exiting edit mode
-
-  // Robust fallback: when savedLayouts arrive later, ensure current zone shows its latest/default layout
+  // When switching to a zone or when its saved layouts change (and we're not editing),
+  // ensure we load the currently active layout for that zone, or fall back to its default.
   useEffect(() => {
     if (!currentZone || isEditingInternal) return;
-    const current = undoRedoLayouts[currentZone.id];
-    const isEmpty = !current || (
-      (!current.tables || current.tables.length === 0) &&
-      (!current.walls || current.walls.length === 0) &&
-      (!current.texts || current.texts.length === 0)
-    );
-    if (isEmpty) {
-      const fallback = getDefaultLayout();
-      if (fallback) {
-        setUndoRedoState({
-          ...zoneLayouts,
-          [currentZone.id]: fallback.layout
-        });
-        setCurrentLayoutId(fallback.id);
-        setLayoutAtEditStart(null);
-        console.log('Applied fallback layout after savedLayouts change for zone:', currentZone.id);
+
+    const zoneId = currentZone.id;
+    const zoneSavedLayouts = savedLayouts[zoneId] || [];
+
+    let targetLayout: Layout = emptyLayout;
+    let targetLayoutId: string | null = null;
+
+    // 1) Try to use currently active layout ID for this zone, if it still exists
+    const activeId = currentLayoutIds[zoneId];
+    if (activeId) {
+      const activeLayout = zoneSavedLayouts.find(l => l.id === activeId);
+      if (activeLayout) {
+        targetLayout = activeLayout.layout;
+        targetLayoutId = activeLayout.id;
       }
     }
-  }, [savedLayouts, currentZone?.id, isEditingInternal, undoRedoLayouts, zoneLayouts, getDefaultLayout, setUndoRedoState]);
+
+    // 2) If no active layout (or it no longer exists), fall back to default for this zone
+    if (!targetLayoutId) {
+      const defaultLayout = zoneSavedLayouts.find(l => l.is_default) || zoneSavedLayouts[0] || null;
+      if (defaultLayout) {
+        targetLayout = defaultLayout.layout;
+        targetLayoutId = defaultLayout.id;
+      } else {
+        targetLayout = emptyLayout;
+        targetLayoutId = null;
+      }
+    }
+
+    // 3) Push the target layout into undo/redo state for this zone,
+    //    avoiding unnecessary history entries if nothing actually changed.
+    setUndoRedoState(prev => {
+      const safePrev = (prev || {}) as ZoneLayouts;
+      const existing = safePrev[zoneId] || emptyLayout;
+      try {
+        if (JSON.stringify(existing) === JSON.stringify(targetLayout)) {
+          // No change for this zone; return original object to avoid triggering updates.
+          return safePrev;
+        }
+      } catch {
+        // If comparison fails for any reason, fall through and apply update
+      }
+      return {
+        ...safePrev,
+        [zoneId]: targetLayout
+      };
+    });
+
+    setLayoutAtEditStart(null);
+
+    // Only update currentLayoutIds when the value for this zone actually changes
+    setCurrentLayoutIds(prev => {
+      const prevId = prev[zoneId] ?? null;
+      if (prevId === targetLayoutId) {
+        return prev;
+      }
+      return { ...prev, [zoneId]: targetLayoutId };
+    });
+
+    if (targetLayoutId) {
+      const name = zoneSavedLayouts.find(l => l.id === targetLayoutId)?.name || '';
+      console.log(`Applied layout "${name}" for zone ${currentZone.name}`);
+    } else {
+      console.log(`No saved layouts for zone ${currentZone.name}, using empty layout`);
+    }
+  }, [currentZone?.id, isEditingInternal, savedLayouts, currentLayoutIds, setUndoRedoState]);
   
   const saveLayoutAs = async (name: string, isDefault: boolean = false) => {
     if (!currentZone || !user?.id) {
@@ -607,8 +658,8 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const updatedSavedLayouts = [...(savedLayouts[currentZone.id] || []), newSavedLayoutData];
       setSavedLayouts(prev => ({ ...prev, [currentZone.id]: updatedSavedLayouts }));
       
-      // Update current layout ID if this is now the active layout
-      setCurrentLayoutId(data.id);
+      // Layout just saved becomes the active one for this zone
+      setCurrentLayoutIds(prev => ({ ...prev, [currentZone.id]: data.id }));
     }
   };
 
@@ -617,7 +668,7 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const layoutToLoad = savedLayouts[currentZone.id]?.find(l => l.id === layoutId);
     if (layoutToLoad) {
       setLayout(layoutToLoad.layout); // This will also trigger debounced save
-      setCurrentLayoutId(layoutId);
+      setCurrentLayoutIds(prev => ({ ...prev, [currentZone.id]: layoutId }));
       // Reset layoutAtEditStart when loading a saved layout
       if (isEditingInternal) {
         setLayoutAtEditStart(JSON.parse(JSON.stringify(layoutToLoad.layout)));
@@ -704,9 +755,9 @@ export const LayoutProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const updatedLayouts = (savedLayouts[currentZone.id] || []).filter(l => l.id !== layoutId);
       setSavedLayouts(prev => ({ ...prev, [currentZone.id]: updatedLayouts }));
       
-      // If we deleted the current layout, clear the currentLayoutId
-      if (currentLayoutId === layoutId) {
-        setCurrentLayoutId(null);
+      // If we deleted the active layout for this zone, clear it
+      if (currentLayoutIds[currentZone.id] === layoutId) {
+        setCurrentLayoutIds(prev => ({ ...prev, [currentZone.id]: null }));
       }
     }
   };

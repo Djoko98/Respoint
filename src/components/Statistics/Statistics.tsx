@@ -5,8 +5,11 @@ import { LayoutContext } from '../../context/LayoutContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { statisticsService } from '../../services/statisticsService';
 import { reservationsService } from '../../services/reservationsService';
+import { eventReservationsService } from '../../services/eventReservationsService';
+import { guestbookService } from '../../services/guestbookService';
 import { supabase } from '../../utils/supabaseClient';
 import { Reservation } from '../../types/reservation';
+import { EventReservation } from '../../types/event';
 import { formatZoneName, formatTableNames } from '../../utils/tableHelper';
 import CustomDatePicker from './CustomDatePicker';
 import {
@@ -57,6 +60,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
       case 'pending':
         return t('pending');
       case 'waiting':
+      case 'booked': // Event reservations use 'booked' status, treat same as 'waiting'
         return t('waiting');
       default:
         return status.charAt(0).toUpperCase() + status.slice(1);
@@ -72,8 +76,12 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
   const [dailyStats, setDailyStats] = useState<any[]>([]);
   const [monthlyStats, setMonthlyStats] = useState<any[]>([]);
   const [topTables, setTopTables] = useState<any[]>([]);
+  const [topZones, setTopZones] = useState<any[]>([]);
+  const [topWaiters, setTopWaiters] = useState<any[]>([]);
+  const [topLoyaltyGuests, setTopLoyaltyGuests] = useState<any[]>([]);
   const [todayReservations, setTodayReservations] = useState<any[]>([]);
   const [allReservations, setAllReservations] = useState<Reservation[]>([]);
+  const [allEventReservations, setAllEventReservations] = useState<EventReservation[]>([]);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
@@ -107,24 +115,86 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
       
 
 
-      // Get aggregated statistics
-      console.log('📊 Statistics component: calling getAggregatedStatistics with:', { userId: user.id, startDate, endDate });
-      const aggregatedStats = await statisticsService.getAggregatedStatistics(user.id, startDate, endDate);
-      console.log('📊 Statistics component: received aggregatedStats:', aggregatedStats);
-      setStats(aggregatedStats);
-      
-      // Get daily statistics for chart
+      // Get daily statistics for chart (regular reservations only, for backward compat)
       const dailyData = await statisticsService.getStatistics(user.id, startDate, endDate);
       setDailyStats(dailyData);
       
-      // If Today filter is selected, get raw reservations for hourly breakdown
+      // Load all reservations for the current filter period
+      let allReservationsData: Reservation[] = [];
+      let allEventReservationsData: EventReservation[] = [];
+      
+      try {
+        console.log('📊 Loading all reservations for period:', { startDate, endDate, filter });
+        allReservationsData = await reservationsService.getReservationsForAnalytics(user.id, startDate, endDate);
+        console.log('📊 All reservations data length:', allReservationsData?.length || 0);
+        setAllReservations(allReservationsData || []);
+      } catch (error) {
+        console.error('Error loading all reservations:', error);
+        setAllReservations([]);
+      }
+
+      // Load all event reservations for the current filter period (including soft deleted for statistics)
+      try {
+        console.log('📊 Loading all event reservations for period:', { startDate, endDate, filter });
+        allEventReservationsData = await eventReservationsService.getForAnalytics(user.id, startDate, endDate);
+        console.log('📊 All event reservations data length:', allEventReservationsData?.length || 0);
+        setAllEventReservations(allEventReservationsData || []);
+      } catch (error) {
+        console.error('Error loading all event reservations:', error);
+        setAllEventReservations([]);
+      }
+
+      // Calculate combined aggregated statistics from both regular and event reservations
+      const combinedStats = {
+        totalReservations: 0,
+        totalGuests: 0,
+        arrivedReservations: 0,
+        notArrivedReservations: 0,
+        cancelledReservations: 0
+      };
+
+      // Count regular reservations
+      (allReservationsData || []).forEach((r: any) => {
+        combinedStats.totalReservations += 1;
+        combinedStats.totalGuests += r.numberOfGuests || 0;
+        // Treat cleared finished stays as arrived
+        if (r.status === 'arrived' || (r.status === 'cancelled' && r.cleared === true)) {
+          combinedStats.arrivedReservations += 1;
+        } else if (r.status === 'not_arrived') {
+          combinedStats.notArrivedReservations += 1;
+        } else if (r.status === 'cancelled') {
+          combinedStats.cancelledReservations += 1;
+        }
+      });
+
+      // Count event reservations
+      (allEventReservationsData || []).forEach((r: any) => {
+        combinedStats.totalReservations += 1;
+        combinedStats.totalGuests += r.numberOfGuests || 0;
+        if (r.status === 'arrived') {
+          combinedStats.arrivedReservations += 1;
+        } else if (r.status === 'not_arrived') {
+          combinedStats.notArrivedReservations += 1;
+        } else if (r.status === 'cancelled') {
+          combinedStats.cancelledReservations += 1;
+        }
+        // 'booked' status is treated as 'waiting', not counted in arrived/not_arrived/cancelled
+      });
+
+      console.log('📊 Combined statistics:', combinedStats);
+      setStats(combinedStats);
+
+      // If Today filter is selected, combine reservations for hourly breakdown
       if (filter === 'today') {
         try {
           console.log('📊 Loading today reservations for date range:', startDate, 'to', endDate);
-          const todayReservationsData = await reservationsService.getReservationsForAnalytics(user.id, startDate, endDate);
-          console.log('📊 Today reservations data:', todayReservationsData);
-          console.log('📊 Number of reservations found:', todayReservationsData.length);
-          setTodayReservations(todayReservationsData || []);
+          // Combine regular and event reservations for today's hourly breakdown
+          const combinedTodayReservations = [
+            ...(allReservationsData || []).map((r: any) => ({ ...r, _type: 'regular' })),
+            ...(allEventReservationsData || []).map((r: any) => ({ ...r, _type: 'event' }))
+          ];
+          console.log('📊 Combined today reservations:', combinedTodayReservations.length);
+          setTodayReservations(combinedTodayReservations);
         } catch (error) {
           console.error('Error loading today reservations:', error);
           setTodayReservations([]);
@@ -133,32 +203,30 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
         // Clear today reservations when not in 'today' filter
         setTodayReservations([]);
       }
-
-      // Load all reservations for the current filter period
-      try {
-        console.log('📊 Loading all reservations for period:', { startDate, endDate, filter });
-        const allReservationsData = await reservationsService.getReservationsForAnalytics(user.id, startDate, endDate);
-        console.log('📊 All reservations data length:', allReservationsData?.length || 0);
-        console.log('📊 Sample reservation data:', allReservationsData?.[0]);
-        setAllReservations(allReservationsData || []);
-      } catch (error) {
-        console.error('Error loading all reservations:', error);
-        setAllReservations([]);
-      }
       
       // Get monthly statistics for overview - using direct reservations for accuracy
       try {
         console.log('📊 Loading monthly statistics');
         const sixMonthsAgo = format(subMonths(new Date(), 6), 'yyyy-MM-dd');
-        const endDate = format(new Date(), 'yyyy-MM-dd');
+        const monthlyEndDate = format(new Date(), 'yyyy-MM-dd');
         
-        // Get all reservations for the last 6 months
-        const monthlyReservationsData = await reservationsService.getReservationsForAnalytics(user.id, sixMonthsAgo, endDate);
+        // Get all reservations for the last 6 months (both regular and event)
+        const [monthlyReservationsData, monthlyEventReservationsData] = await Promise.all([
+          reservationsService.getReservationsForAnalytics(user.id, sixMonthsAgo, monthlyEndDate),
+          eventReservationsService.getForAnalytics(user.id, sixMonthsAgo, monthlyEndDate)
+        ]);
         console.log('📊 Monthly reservations data:', monthlyReservationsData?.length || 0, 'reservations');
+        console.log('📊 Monthly event reservations data:', monthlyEventReservationsData?.length || 0, 'event reservations');
         
-        if (monthlyReservationsData && monthlyReservationsData.length > 0) {
+        // Combine regular and event reservations for monthly stats
+        const allMonthlyData = [
+          ...(monthlyReservationsData || []).map((r: any) => ({ ...r, type: 'regular' })),
+          ...(monthlyEventReservationsData || []).map((r: any) => ({ ...r, type: 'event' }))
+        ];
+        
+        if (allMonthlyData.length > 0) {
           // Group by month
-          const monthlyGrouped = monthlyReservationsData.reduce((acc: any, reservation: any) => {
+          const monthlyGrouped = allMonthlyData.reduce((acc: any, reservation: any) => {
             const month = format(parseISO(reservation.date), 'yyyy-MM');
             if (!acc[month]) {
               acc[month] = {
@@ -199,51 +267,149 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
         setMonthlyStats([]);
       }
       
-      // Get top tables statistics
+      // Get top tables statistics (combined from regular and event reservations)
       try {
-        console.log('📊 Loading top tables statistics');
-        const { data: topTablesData, error: topTablesError } = await supabase
-          .rpc('get_top_tables', { p_user_id: user.id })
-          .limit(10);
+        console.log('📊 Loading top tables statistics (combined regular + event)');
+        const tableCount: { [key: string]: number } = {};
+        
+        // Get all regular reservations for the user
+        const { data: regularReservationsForTables, error: regularError } = await supabase
+          .from('reservations')
+          .select('table_ids')
+          .eq('user_id', user.id)
+          .not('table_ids', 'is', null);
           
-        if (topTablesError) {
-          console.error('Error loading top tables:', topTablesError);
+        if (!regularError && regularReservationsForTables) {
+          regularReservationsForTables.forEach((reservation: any) => {
+            if (reservation.table_ids && Array.isArray(reservation.table_ids)) {
+              reservation.table_ids.forEach((tableId: string) => {
+                tableCount[tableId] = (tableCount[tableId] || 0) + 1;
+              });
+            }
+          });
+        }
+        
+        // Get all event reservations for the user (for tables and zones)
+        const { data: eventReservationsForTables, error: eventError } = await supabase
+          .from('event_reservations')
+          .select('table_ids')
+          .eq('user_id', user.id)
+          .not('table_ids', 'is', null);
           
-          // Fallback: manual calculation from allReservations
-          console.log('📊 Using fallback calculation for top tables');
-          const tableCount: { [key: string]: number } = {};
+        if (!eventError && eventReservationsForTables) {
+          eventReservationsForTables.forEach((reservation: any) => {
+            if (reservation.table_ids && Array.isArray(reservation.table_ids)) {
+              // Event reservations store table numbers/names directly, not IDs
+              reservation.table_ids.forEach((tableNumber: string) => {
+                tableCount[tableNumber] = (tableCount[tableNumber] || 0) + 1;
+              });
+            }
+          });
+        }
+        
+        // Convert to array and sort for tables
+        const topTablesArray = Object.entries(tableCount)
+          .map(([tableId, count]) => ({
+            table_id: tableId,
+            reservation_count: count
+          }))
+          .sort((a, b) => b.reservation_count - a.reservation_count)
+          .slice(0, 10);
           
-          // Get all reservations for the user (not just current period)
-          const { data: allReservationsForTables, error: allReservationsError } = await supabase
-            .from('reservations')
-            .select('table_ids')
-            .eq('user_id', user.id)
-            .not('table_ids', 'is', null);
-            
-          if (!allReservationsError && allReservationsForTables) {
-            allReservationsForTables.forEach((reservation: any) => {
-              if (reservation.table_ids && Array.isArray(reservation.table_ids)) {
-                reservation.table_ids.forEach((tableId: string) => {
-                  tableCount[tableId] = (tableCount[tableId] || 0) + 1;
-                });
-              }
+        console.log('📊 Combined top tables:', topTablesArray);
+        setTopTables(topTablesArray);
+
+        // ----- Top Zones -----
+        const zoneCount: Record<string, number> = {};
+
+        // Count regular reservations per zone
+        (allReservationsData || []).forEach((r: any) => {
+          const zoneId = r.zoneId || r.zone_id;
+          if (!zoneId) return;
+          zoneCount[zoneId] = (zoneCount[zoneId] || 0) + 1;
+        });
+
+        // Count event reservations per zone
+        (allEventReservationsData || []).forEach((r: any) => {
+          const zoneId = r.zoneId || r.zone_id;
+          if (!zoneId) return;
+          zoneCount[zoneId] = (zoneCount[zoneId] || 0) + 1;
+        });
+
+        const topZonesArray = Object.entries(zoneCount)
+          .map(([zoneId, count]) => ({
+            zone_id: zoneId,
+            reservation_count: count
+          }))
+          .sort((a, b) => b.reservation_count - a.reservation_count)
+          .slice(0, 10);
+
+        console.log('📊 Combined top zones:', topZonesArray);
+        setTopZones(topZonesArray);
+
+        // ----- Top Waiters -----
+        const waiterCount: Record<string, number> = {};
+
+        try {
+          // Regular reservations waiters
+          const { data: waiterRows, error: waiterErr } = await supabase
+            .from('reservation_waiters')
+            .select('waiter_name')
+            .eq('user_id', user.id);
+
+          if (!waiterErr && waiterRows) {
+            waiterRows.forEach((row: any) => {
+              const name = (row.waiter_name || '').trim();
+              if (!name) return;
+              waiterCount[name] = (waiterCount[name] || 0) + 1;
             });
-            
-            // Convert to array and sort
-            const topTablesArray = Object.entries(tableCount)
-              .map(([tableId, count]) => ({
-                table_id: tableId,
-                reservation_count: count
-              }))
-              .sort((a, b) => b.reservation_count - a.reservation_count)
-              .slice(0, 10);
-              
-            setTopTables(topTablesArray);
-          } else {
-            setTopTables([]);
           }
-        } else {
-          setTopTables(topTablesData || []);
+        } catch (err) {
+          console.error('Error loading waiter statistics:', err);
+        }
+
+        const topWaitersArray = Object.entries(waiterCount)
+          .map(([name, count]) => ({
+            waiter_name: name,
+            reservation_count: count
+          }))
+          .sort((a, b) => b.reservation_count - a.reservation_count)
+          .slice(0, 10);
+
+        console.log('📊 Top waiters:', topWaitersArray);
+        setTopWaiters(topWaitersArray);
+
+        // ----- Top Loyalty Guests (Guestbook) -----
+        try {
+          const guestbookEntries = await guestbookService.list();
+          const loyaltyCandidates = (guestbookEntries || []).filter((g: any) => {
+            const visits = typeof g.totalVisits === 'number' ? g.totalVisits : 0;
+            const avgBill = typeof g.averageBill === 'number' ? g.averageBill : 0;
+            const hasLoyaltyTag =
+              Array.isArray(g.tags) && g.tags.some((t: string) => typeof t === 'string' && t.startsWith('loy:'));
+            // Consider as loyalty if marked VIP or has a loyalty tag, and has at least 1 visit
+            return (g.isVip || hasLoyaltyTag) && (visits > 0 || avgBill > 0);
+          });
+
+          const topLoyaltyArray = loyaltyCandidates
+            .map((g: any) => ({
+              id: g.id,
+              name: g.name || '',
+              totalVisits: typeof g.totalVisits === 'number' ? g.totalVisits : 0,
+              averageBill: typeof g.averageBill === 'number' ? g.averageBill : 0
+            }))
+            .sort((a, b) => {
+              if (b.totalVisits !== a.totalVisits) return b.totalVisits - a.totalVisits;
+              if (b.averageBill !== a.averageBill) return b.averageBill - a.averageBill;
+              return a.name.localeCompare(b.name || '');
+            })
+            .slice(0, 10);
+
+          console.log('📊 Top loyalty guests:', topLoyaltyArray);
+          setTopLoyaltyGuests(topLoyaltyArray);
+        } catch (err) {
+          console.error('Error loading top loyalty guests:', err);
+          setTopLoyaltyGuests([]);
         }
       } catch (error) {
         console.error('Error loading top tables:', error);
@@ -308,21 +474,32 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
     window.URL.revokeObjectURL(url);
   };
   
-  // Clear all reservations history
+  // Clear all reservations history (both regular and event reservations)
   const handleClearHistory = async () => {
     if (!user) return;
     
     setIsDeleting(true);
     try {
-      // Delete all reservations for the user
+      // Delete all regular reservations for the user
       const { error } = await supabase
         .from('reservations')
         .delete()
         .eq('user_id', user.id);
         
       if (error) {
-        console.error('Error clearing history:', error);
+        console.error('Error clearing regular reservations:', error);
         throw error;
+      }
+      
+      // Delete all event reservations for the user
+      const { error: eventError } = await supabase
+        .from('event_reservations')
+        .delete()
+        .eq('user_id', user.id);
+        
+      if (eventError) {
+        console.error('Error clearing event reservations:', eventError);
+        throw eventError;
       }
       
       // Delete all statistics for the user
@@ -332,7 +509,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
         .eq('user_id', user.id);
         
       if (statsError) {
-        console.error('Error clearing statistics:', error);
+        console.error('Error clearing statistics:', statsError);
         throw statsError;
       }
       
@@ -459,6 +636,12 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
     }
     
     // For other filters, show daily breakdown
+    // Combine regular and event reservations for charts
+    const combinedReservations = [
+      ...allReservations.map(r => ({ ...r, _type: 'regular' as const })),
+      ...allEventReservations.map(r => ({ ...r, _type: 'event' as const }))
+    ];
+
     if (filter === 'month') {
       // For month filter, generate all days in selected month using direct reservation data
       const selectedMonthObj = new Date(selectedMonth + '-01');
@@ -470,19 +653,23 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
       for (let day = startOfCurrentMonth; day <= endOfCurrentMonth; day = new Date(day.getTime() + 24 * 60 * 60 * 1000)) {
         const dateStr = format(day, 'yyyy-MM-dd');
         
-        // Calculate from direct reservation data to ensure accuracy
-        const dayReservations = allReservations.filter(r => r.date === dateStr);
+        // Calculate from combined reservation data (regular + event)
+        const dayReservations = combinedReservations.filter(r => r.date === dateStr);
         
         daysInMonth.push({
           date: format(day, 'dd'),
           reservations: dayReservations.length,
           guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
           arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
-          notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
+          notArrived: dayReservations.filter(r => r.status === 'not_arrived').length,
           cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
         });
       }
-      
+
+      // If there are no reservations in the whole month, treat as "no data"
+      const hasData = daysInMonth.some(d => d.reservations > 0);
+      if (!hasData) return [];
+
       return daysInMonth;
     }
     
@@ -497,23 +684,27 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
       for (let day = startOfCurrentWeek; day <= endOfCurrentWeek; day = new Date(day.getTime() + 24 * 60 * 60 * 1000)) {
         const dateStr = format(day, 'yyyy-MM-dd');
         
-        // Calculate from direct reservation data to ensure accuracy
-        const dayReservations = allReservations.filter(r => r.date === dateStr);
+        // Calculate from combined reservation data (regular + event)
+        const dayReservations = combinedReservations.filter(r => r.date === dateStr);
         
         daysInWeek.push({
           date: format(day, 'EEE'),
           reservations: dayReservations.length,
           guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
-        arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
-          notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
-        cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
+          arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
+          notArrived: dayReservations.filter(r => r.status === 'not_arrived').length,
+          cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
         });
       }
-      
+
+      // If there are no reservations in the whole week, treat as "no data"
+      const hasData = daysInWeek.some(d => d.reservations > 0);
+      if (!hasData) return [];
+
       return daysInWeek;
     }
     
-    // For other filters, show last 7 days using direct reservation data
+    // For other filters, show last 7 days using combined reservation data
     const now = new Date();
     const last7Days = [];
     
@@ -521,16 +712,16 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
       const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
       const dateStr = format(day, 'yyyy-MM-dd');
       
-      // Calculate from direct reservation data to ensure accuracy
-      const dayReservations = allReservations.filter(r => r.date === dateStr);
+      // Calculate from combined reservation data (regular + event)
+      const dayReservations = combinedReservations.filter(r => r.date === dateStr);
       
       last7Days.push({
         date: format(day, 'dd'),
         reservations: dayReservations.length,
         guests: dayReservations.reduce((sum, r) => sum + r.numberOfGuests, 0),
-      arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
-        notArrived: dayReservations.filter(r => r.status === 'not_arrived').length, // only explicit not_arrived
-      cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
+        arrived: dayReservations.filter(r => r.status === 'arrived' || (r.status === 'cancelled' && (r as any).cleared === true)).length,
+        notArrived: dayReservations.filter(r => r.status === 'not_arrived').length,
+        cancelled: dayReservations.filter(r => r.status === 'cancelled' && !(r as any).cleared).length
       });
     }
     
@@ -558,10 +749,10 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
   };
   
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-center justify-center p-4">
-      <div className="bg-[#000814] rounded-lg shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h)] bg-black/70 backdrop-blur-sm backdrop-brightness-75 z-[12050] flex items-stretch justify-center p-0">
+      <div className="bg-[#000814] w-full h-full max-w-none max-h-none rounded-none flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+        <div className="flex items-center justify-between px-6 py-4">
           <h2 className="text-xl font-light text-white tracking-wide">{t('statistics')}</h2>
           <button
             onClick={onClose}
@@ -747,9 +938,9 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
 
               </div>
               
-              <div className="grid grid-cols-1 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Reservations by Day/Hour */}
-                <div className="bg-[#0A1929] border border-gray-800 rounded p-4 lg:col-span-2 xl:col-span-2">
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
                   <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">
                     {filter === 'today' ? t('hourlyBreakdown') : filter === 'week' ? t('weeklyBreakdown') : t('dailyBreakdown')}
                   </h3>
@@ -821,15 +1012,15 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                       <div className="mt-2 w-full flex items-center justify-center gap-6 text-xs select-none">
                       <div className="flex items-center gap-2">
                         <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#22C55E' }} />
-                        <span className={isLight ? 'text-green-700' : 'text-green-400'}>{t('arrivedLabel')}</span>
+                        <span className={isLight ? 'text-green-600' : 'text-green-400'}>{t('arrivedLabel')}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#EF4444' }} />
-                        <span className={isLight ? 'text-red-700' : 'text-red-400'}>{t('notArrivedLabel')}</span>
+                        <span className={isLight ? 'text-red-600' : 'text-red-400'}>{t('notArrivedLabel')}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: '#6B7280' }} />
-                        <span className={isLight ? 'text-gray-700' : 'text-gray-400'}>{t('cancelledLabel')}</span>
+                        <span className={isLight ? 'text-gray-600' : 'text-gray-400'}>{t('cancelledLabel')}</span>
                       </div>
                     </div>
                     </div>
@@ -843,7 +1034,7 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                 </div>
                 
                 {/* Overview (Daily/Weekly/Monthly based on filter) */}
-                <div className="bg-[#0A1929] border border-gray-800 rounded p-4 lg:col-span-2 xl:col-span-2">
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
                   <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">{filter === 'today' ? t('dailyOverview') : filter === 'week' ? t('weeklyOverview') : t('monthlyOverview')}</h3>
                   <div className="h-[180px] overflow-y-auto space-y-4 pr-2 statistics-scrollbar">
                     {getOverviewItems().length > 0 ? (
@@ -917,34 +1108,54 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                   </div>
                 </div>
                 
+              </div>
+
+              {/* Second row: Top Tables / Top Zones / Top Waiters / Top Loyalty Guests */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 {/* Top Tables */}
-                <div className="bg-[#0A1929] border border-gray-800 rounded p-4 lg:col-span-1 xl:col-span-1">
-                  <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">{t('topTablesTitle')}</h3>
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
+                  <h3 className="text-sm font-medium ${isLight ? 'text-gray-800' : 'text-gray-300'} mb-4 uppercase tracking-wider">{t('topTablesTitle')}</h3>
                   <div className="h-[180px] overflow-y-auto space-y-3 pr-2 statistics-scrollbar">
                     {topTables.length > 0 ? (
-                      topTables.map((table, index) => {
-                        const tableName = formatTableNames([table.table_id], zoneLayouts);
-                      return (
-                                                     <div key={table.table_id} className="flex items-center justify-between py-2 px-3 bg-gray-800/50 rounded top-tables-item">
-                             <div className="flex items-center gap-3">
-                               <span className="text-xs font-medium text-gray-400 w-6">
-                                 #{index + 1}
-                               </span>
-                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-500">
-                                 <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                                 <line x1="8" y1="21" x2="16" y2="21"/>
-                                 <line x1="12" y1="17" x2="12" y2="21"/>
-                               </svg>
-                               <span className="text-sm text-white font-medium">
-                                 {tableName}
-                               </span>
-                             </div>
-                             <span className="text-xs text-gray-400">
-                               {table.reservation_count} res
-                             </span>
-                           </div>
-                        );
-                      })
+                      topTables
+                        .map((table) => ({
+                          ...table,
+                          name: formatTableNames([table.table_id], zoneLayouts)
+                        }))
+                        .filter((t) => t.name && t.name.trim().length > 0)
+                        .map((table, index) => (
+                          <div
+                            key={table.table_id}
+                            className={`flex items-center justify-between py-2 px-3 rounded top-tables-item ${
+                              isLight ? 'bg-gray-100' : 'bg-gray-800/50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className={`text-xs font-medium w-6 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                                #{index + 1}
+                              </span>
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                className={isLight ? 'text-gray-500' : 'text-gray-500'}
+                              >
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                                <line x1="8" y1="21" x2="16" y2="21" />
+                                <line x1="12" y1="17" x2="12" y2="21" />
+                              </svg>
+                              <span className={`text-sm font-medium ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                                {table.name}
+                              </span>
+                            </div>
+                            <span className={`text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                              {table.reservation_count} res
+                            </span>
+                          </div>
+                        ))
                     ) : (
                       <div className="h-full flex items-center justify-center">
                         <span className="text-xs text-gray-600">{t('noTableDataAvailable')}</span>
@@ -952,110 +1163,299 @@ const Statistics: React.FC<StatisticsProps> = ({ isOpen, onClose }) => {
                     )}
                   </div>
                 </div>
-              </div>
 
-              {/* All Reservations List */}
-              {allReservations && allReservations.length > 0 && (
-                <div className="mt-6">
-                  <div className="bg-[#0A1929] border border-gray-800 rounded p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">
-                      {t('allReservations')} ({allReservations.length})
-                    </h3>
-                    <p className="text-xs text-gray-500 mb-4">
-                      {t('allReservationsDescription')}
-                    </p>
-                    <div className="h-[320px] overflow-y-auto statistics-scrollbar">
-                      <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className={`border-b ${isLight ? 'border-gray-200' : 'border-gray-800'}`}>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('date')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('time')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('guestName')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('guests')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('phone')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('status')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('zone')}</th>
-                            <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('notes')}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {allReservations
-                            .sort((a, b) => {
-                              // Sort by date first (newest first), then by time (latest first)
-                              const dateCompare = b.date.localeCompare(a.date);
-                              if (dateCompare !== 0) return dateCompare;
-                              return b.time.localeCompare(a.time);
-                            })
-                            .map((reservation) => (
-                              <tr key={reservation.id} className={`border-b ${isLight ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-800 hover:bg-gray-900/30'} ${reservation.isDeleted ? 'opacity-60' : ''}`}>
-                                <td className="py-2 px-3 text-gray-300">
-                                  {format(new Date(reservation.date), 'dd/MM/yyyy')}
-                                </td>
-                                <td className="py-2 px-3 text-gray-300">
-                                  {reservation.time}
-                                </td>
-                                <td className="py-2 px-3 text-white font-medium">
-                                  {reservation.guestName}
-                                  {reservation.isDeleted && (
-                                    <span className="ml-2 text-xs text-gray-500">{t('deleted')}</span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3 text-gray-300">
-                                  {reservation.numberOfGuests}
-                                </td>
-                                <td className="py-2 px-3 text-gray-300">
-                                  {reservation.phone || '-'}
-                                </td>
-                                <td className="py-2 px-3">
-                                  {(() => {
-                                    const displayStatus = (reservation.status === 'cancelled' && reservation.cleared === true)
-                                      ? 'arrived'
-                                      : reservation.status;
-                                    const chipClass = (() => {
-                                      if (isLight) {
-                                        return displayStatus === 'arrived'
-                                          ? 'bg-green-100 text-green-700 border border-green-300'
-                                          : displayStatus === 'not_arrived'
-                                          ? 'bg-red-100 text-red-700 border border-red-300'
-                                          : displayStatus === 'cancelled'
-                                          ? 'bg-gray-200 text-gray-700 border border-gray-300'
-                                          : displayStatus === 'confirmed'
-                                          ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                                          : 'bg-yellow-100 text-yellow-700 border border-yellow-300';
-                                      }
-                                      return displayStatus === 'arrived'
-                                        ? 'bg-green-900/50 text-green-400 border border-green-800'
-                                        : displayStatus === 'not_arrived'
-                                        ? 'bg-red-900/50 text-red-400 border border-red-800'
-                                        : displayStatus === 'cancelled'
-                                        ? 'bg-gray-900/50 text-gray-400 border border-gray-800'
-                                        : displayStatus === 'confirmed'
-                                        ? 'bg-blue-900/50 text-blue-400 border border-blue-800'
-                                        : 'bg-yellow-900/50 text-yellow-400 border border-yellow-800';
-                                    })();
-                                    return (
-                                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${chipClass}`}>
-                                        {getStatusTranslation(displayStatus)}
-                                      </span>
-                                    );
-                                  })()}
-                                </td>
-                                <td className="py-2 px-3 text-gray-300">
-                                  {formatZoneName(reservation.zoneId, reservation.zoneName, zones)}
-                                </td>
-                                <td className="py-2 px-3 text-gray-400 max-w-[150px] truncate">
-                                  {reservation.notes || '-'}
-                                </td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
+                {/* Top Zones */}
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
+                  <h3 className={`text-sm font-medium mb-4 uppercase tracking-wider ${isLight ? 'text-gray-800' : 'text-gray-300'}`}>
+                    {t('topZonesTitle')}
+                  </h3>
+                  <div className="h-[180px] overflow-y-auto space-y-3 pr-2 statistics-scrollbar">
+                    {topZones.length > 0 ? (
+                      topZones.map((zone, index) => {
+                        const zoneObj = zones.find((z) => String(z.id) === String(zone.zone_id));
+                        const zoneName = zoneObj?.name || zone.zone_id;
+                        return (
+                          <div
+                            key={zone.zone_id}
+                            className={`flex items-center justify-between py-2 px-3 rounded top-tables-item ${
+                              isLight ? 'bg-gray-100' : 'bg-gray-800/50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className={`text-xs font-medium w-6 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                                #{index + 1}
+                              </span>
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                className={isLight ? 'text-gray-500' : 'text-gray-500'}
+                              >
+                                <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
+                                <line x1="3" y1="10" x2="21" y2="10" />
+                              </svg>
+                              <span className={`text-sm font-medium ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                                {zoneName}
+                              </span>
+                            </div>
+                            <span className={`text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                              {zone.reservation_count} res
+                            </span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <span className="text-xs text-gray-600">{t('noDataAvailable')}</span>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
-              )}
+
+                {/* Top Waiters */}
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
+                  <h3 className={`text-sm font-medium mb-4 uppercase tracking-wider ${isLight ? 'text-gray-800' : 'text-gray-300'}`}>
+                    {t('topWaitersTitle')}
+                  </h3>
+                  <div className="h-[180px] overflow-y-auto space-y-3 pr-2 statistics-scrollbar">
+                    {topWaiters.length > 0 ? (
+                      topWaiters.map((waiter, index) => (
+                        <div
+                          key={waiter.waiter_name}
+                          className={`flex items-center justify-between py-2 px-3 rounded top-tables-item ${
+                            isLight ? 'bg-gray-100' : 'bg-gray-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-medium w-6 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                              #{index + 1}
+                            </span>
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              className={isLight ? 'text-gray-500' : 'text-gray-500'}
+                            >
+                              <circle cx="12" cy="8" r="3" />
+                              <path d="M5 21c0-3.5 3-6 7-6s7 2.5 7 6" />
+                            </svg>
+                            <span className={`text-sm font-medium ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                              {waiter.waiter_name}
+                            </span>
+                          </div>
+                          <span className={`text-xs ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                            {waiter.reservation_count} res
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <span className="text-xs text-gray-600">{t('noDataAvailable')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top Loyalty Guests */}
+                <div className={`${isLight ? 'bg-white border-gray-200' : 'bg-[#0A1929] border-gray-800'} border rounded p-4`}>
+                  <h3 className={`text-sm font-medium mb-4 uppercase tracking-wider ${isLight ? 'text-gray-800' : 'text-gray-300'}`}>
+                    {t('topLoyaltyTitle')}
+                  </h3>
+                  <div className="h-[180px] overflow-y-auto space-y-3 pr-2 statistics-scrollbar">
+                    {topLoyaltyGuests.length > 0 ? (
+                      topLoyaltyGuests.map((guest, index) => (
+                        <div
+                          key={guest.id}
+                          className={`flex items-center justify-between py-2 px-3 rounded top-tables-item ${
+                            isLight ? 'bg-gray-100' : 'bg-gray-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-medium w-6 ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                              #{index + 1}
+                            </span>
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              className={isLight ? 'text-yellow-500' : 'text-yellow-400'}
+                            >
+                              <path d="M12 2l3 7h7l-5.5 4.2L18 21l-6-3.8L6 21l1.5-7.8L2 9h7z" />
+                            </svg>
+                            <div className="flex flex-col">
+                              <span className={`text-sm font-medium ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                                {guest.name || '-'}
+                              </span>
+                              <span className={`text-[11px] ${isLight ? 'text-gray-600' : 'text-gray-400'}`}>
+                                {guest.totalVisits} visits
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={`block text-xs font-medium ${isLight ? 'text-gray-800' : 'text-gray-200'}`}>
+                              {guest.averageBill ? guest.averageBill.toLocaleString() : '0'}
+                            </span>
+                            <span className={`block text-[11px] ${isLight ? 'text-gray-500' : 'text-gray-400'}`}>
+                              avg bill
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <span className="text-xs text-gray-600">{t('noDataAvailable')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* All Reservations List (always shown, even when empty) */}
+              <div className="mt-6">
+                <div className="bg-[#0A1929] border border-gray-800 rounded p-4">
+                  <h3 className="text-sm font-medium text-gray-300 mb-4 uppercase tracking-wider">
+                    {t('allReservations')} ({(allReservations?.length || 0) + (allEventReservations?.length || 0)})
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-4">
+                    {t('allReservationsDescription')}
+                  </p>
+                  {(allReservations && allReservations.length > 0) || (allEventReservations && allEventReservations.length > 0) ? (
+                    <div className="h-[320px] overflow-y-auto statistics-scrollbar">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className={`border-b ${isLight ? 'border-gray-200' : 'border-gray-800'}`}>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('type')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('date')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('time')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('guestName')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('guests')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('phone')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('status')}</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('zone')}</th>
+                              {/* Show service type instead of generic notes for all-reservations panel */}
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium">{t('serviceType')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Combined and sorted reservations */}
+                            {[
+                              ...(allReservations || []).map((r) => ({ ...r, _type: 'regular' as const })),
+                              ...(allEventReservations || []).map((r) => ({ ...r, _type: 'event' as const }))
+                            ]
+                              .slice()
+                              .sort((a, b) => {
+                                // Sort by date first (newest first), then by time (latest first)
+                                const dateCompare = b.date.localeCompare(a.date);
+                                if (dateCompare !== 0) return dateCompare;
+                                return b.time.localeCompare(a.time);
+                              })
+                              .map((reservation) => (
+                                <tr
+                                  key={`${reservation._type}-${reservation.id}`}
+                                  className={`border-b ${
+                                    isLight
+                                      ? 'border-gray-200 hover:bg-gray-50'
+                                      : 'border-gray-800 hover:bg-gray-900/30'
+                                  } ${(reservation as any).isDeleted ? 'opacity-60' : ''}`}
+                                >
+                                  <td className="py-2 px-3">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                      reservation._type === 'event'
+                                        ? (isLight ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-purple-500/20 text-purple-300 border-purple-500/30')
+                                        : (isLight ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-blue-500/20 text-blue-300 border-blue-500/30')
+                                    }`}>
+                                      {reservation._type === 'event' ? 'Event' : 'Regular'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-300">
+                                    {format(new Date(reservation.date), 'dd/MM/yyyy')}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-300">
+                                    {reservation.time}
+                                  </td>
+                                  <td className="py-2 px-3 text-white font-medium">
+                                    {reservation.guestName}
+                                    {(reservation as any).isDeleted && (
+                                      <span className="ml-2 text-xs text-gray-500">{t('deleted')}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-300">
+                                    {reservation.numberOfGuests}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-300">
+                                    {reservation.phone || '-'}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    {(() => {
+                                      // Normalize status: 'booked' -> 'waiting', cleared cancelled -> 'arrived'
+                                      let displayStatus = reservation.status;
+                                      if (reservation.status === 'cancelled' && (reservation as any).cleared === true) {
+                                        displayStatus = 'arrived';
+                                      } else if (reservation.status === 'booked') {
+                                        displayStatus = 'waiting'; // Event reservations use 'booked', normalize to 'waiting'
+                                      }
+                                      const chipClass = (() => {
+                                        if (isLight) {
+                                          return displayStatus === 'arrived'
+                                            ? 'bg-green-100 text-green-700 border border-green-300'
+                                            : displayStatus === 'not_arrived'
+                                            ? 'bg-red-100 text-red-700 border border-red-300'
+                                            : displayStatus === 'cancelled'
+                                            ? 'bg-gray-200 text-gray-700 border border-gray-300'
+                                            : displayStatus === 'confirmed'
+                                            ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                                            : 'bg-yellow-100 text-yellow-700 border border-yellow-300'; // waiting
+                                        }
+                                        return displayStatus === 'arrived'
+                                          ? 'bg-green-900/50 text-green-400 border border-green-800'
+                                          : displayStatus === 'not_arrived'
+                                          ? 'bg-red-900/50 text-red-400 border border-red-800'
+                                          : displayStatus === 'cancelled'
+                                          ? 'bg-gray-900/50 text-gray-400 border border-gray-800'
+                                          : displayStatus === 'confirmed'
+                                          ? 'bg-blue-900/50 text-blue-400 border border-blue-800'
+                                          : 'bg-yellow-900/50 text-yellow-400 border border-yellow-800'; // waiting
+                                      })();
+                                      return (
+                                        <span
+                                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${chipClass}`}
+                                        >
+                                          {getStatusTranslation(displayStatus)}
+                                        </span>
+                                      );
+                                    })()}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-300">
+                                    {formatZoneName(reservation.zoneId, (reservation as any).zoneName, zones)}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-400 max-w-[150px] truncate">
+                                    {reservation.notes || '-'}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-[160px] flex items-center justify-center">
+                      <span className="text-xs text-gray-600">
+                        {t('noReservationsEntered')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           ) : (
             <div className="flex items-center justify-center h-64">

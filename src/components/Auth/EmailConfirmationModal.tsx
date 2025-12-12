@@ -5,6 +5,7 @@ import DeleteConfirmationModal from "../common/DeleteConfirmationModal";
 interface EmailConfirmationModalProps {
   isOpen: boolean;
   email: string;
+  password?: string; // Password za automatski login nakon verifikacije
   onConfirmed: () => void;
   onClose: () => void;
 }
@@ -12,6 +13,7 @@ interface EmailConfirmationModalProps {
 const EmailConfirmationModal: React.FC<EmailConfirmationModalProps> = ({ 
   isOpen, 
   email, 
+  password,
   onConfirmed,
   onClose 
 }) => {
@@ -46,12 +48,17 @@ const EmailConfirmationModal: React.FC<EmailConfirmationModalProps> = ({
     }
   }, [isOpen]);
 
+  // Polling za proveru da li je email verifikovan
+  const [verificationStatus, setVerificationStatus] = useState<'pending' | 'verified' | 'error'>('pending');
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !email) return;
 
     // Postavi listener za auth promene
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
+        console.log('✅ User signed in via auth state change');
+        setVerificationStatus('verified');
         onConfirmed();
       }
     });
@@ -67,11 +74,85 @@ const EmailConfirmationModal: React.FC<EmailConfirmationModalProps> = ({
       });
     }, 1000);
 
+    // Polling za proveru verifikacije
+    // Ako imamo password, pokušavamo login svakih 3 sekunde
+    // Kada login uspe, znači da je email verifikovan
+    let pollCount = 0;
+    const maxPolls = 200; // Max 10 minuta (200 * 3s)
+    let isVerified = false;
+    
+    const pollForVerification = async () => {
+      if (isVerified) return true;
+      
+      try {
+        // Ako imamo password, pokušaj login
+        if (password) {
+          console.log('🔄 Attempting login to check verification...');
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          
+          if (data?.session && !error) {
+            console.log('✅ Login successful! Email was verified.');
+            isVerified = true;
+            setVerificationStatus('verified');
+            // Kratka pauza pre nego što zatvorimo modal
+            setTimeout(() => {
+              onConfirmed();
+            }, 1000);
+            return true;
+          }
+          
+          // Ako je greška "Email not confirmed", nastavi polling
+          if (error?.message?.toLowerCase().includes('email not confirmed')) {
+            console.log('⏳ Email still not confirmed, waiting...');
+            return false;
+          }
+          
+          // Druge greške - nastavi polling
+          console.log('⏳ Login attempt failed:', error?.message);
+        }
+        
+        // Fallback: proveri postojeću sesiju
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email_confirmed_at) {
+          console.log('✅ Email verified via session check!');
+          isVerified = true;
+          setVerificationStatus('verified');
+          onConfirmed();
+          return true;
+        }
+        
+        return false;
+      } catch (error) {
+        console.log('Polling check failed:', error);
+        return false;
+      }
+    };
+    
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      if (pollCount > maxPolls || isVerified) {
+        clearInterval(pollInterval);
+        return;
+      }
+      
+      await pollForVerification();
+    }, 3000);
+    
+    // Počni polling nakon 5 sekundi (da korisnik ima vremena da klikne link)
+    const initialDelay = setTimeout(() => {
+      pollForVerification();
+    }, 5000);
+
     return () => {
       authListener?.subscription.unsubscribe();
       clearInterval(timer);
+      clearInterval(pollInterval);
+      clearTimeout(initialDelay);
     };
-  }, [isOpen, onConfirmed]);
+  }, [isOpen, email, password, onConfirmed]);
 
   const handleResendEmail = async () => {
     setIsChecking(true);
@@ -115,12 +196,31 @@ const EmailConfirmationModal: React.FC<EmailConfirmationModalProps> = ({
           </div>
 
           <div className="bg-gray-800 rounded-lg p-4 mb-6">
+            {verificationStatus === 'pending' && (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                  <p className="text-sm text-yellow-500 font-medium">Waiting for verification...</p>
+                </div>
             <p className="text-sm text-gray-300 mb-2">
               Please click the link in the email to confirm your account.
             </p>
             <p className="text-xs text-gray-500">
-              This window will automatically close once your email is confirmed.
-            </p>
+                  The link will open in your browser. Once verified, this app will automatically detect it and log you in.
+                </p>
+              </>
+            )}
+            {verificationStatus === 'verified' && (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <p className="text-sm text-green-500 font-medium">Email verified!</p>
+                </div>
+                <p className="text-sm text-gray-300">
+                  Your account has been confirmed. Logging you in...
+                </p>
+              </>
+            )}
           </div>
 
           <div className="space-y-3">

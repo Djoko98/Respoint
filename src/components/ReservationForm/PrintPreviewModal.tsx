@@ -11,12 +11,22 @@ interface PrintPreviewModalProps {
     date: string;
     time: string;
     numberOfGuests: number;
-    tableNumber: string;
-    serviceType: string;
-    additionalRequirements: string;
+    tableNumber?: string;
+    tableNumbers?: string[];
+    serviceType?: string;
+    additionalRequirements?: string;
+    notes?: string;
+    zoneName?: string;
+    phone?: string;
     restaurantName?: string;
     restaurantAddress?: string;
     logoUrl?: string;
+    // Event reservation specific fields
+    reservationCode?: string;
+    isEventReservation?: boolean;
+    paymentStatus?: string;
+    depositRequired?: number;
+    ticketPrice?: number;
   };
 }
 
@@ -73,6 +83,19 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
+    // Get table display value
+    const tableDisplay = reservationData.tableNumber 
+      || (reservationData.tableNumbers?.length ? reservationData.tableNumbers.join(', ') : '');
+    
+    // Get notes/requirements display value
+    const notesDisplay = reservationData.additionalRequirements || reservationData.notes || '';
+    
+    // Get service type display
+    const serviceDisplay = reservationData.serviceType || '';
+    
+    // Reservation code label
+    const codeLabel = locale === 'sr-RS' ? 'Kod rezervacije' : 'Reservation Code';
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -90,18 +113,20 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               </div>
             ` : ''}
             <div class="sep"></div>
-            <div class="center bold" style="font-size:20px;">${t('reservationTitle')}</div>
+            <div class="center bold" style="font-size:20px;">${reservationData.isEventReservation ? (locale === 'sr-RS' ? 'EVENT REZERVACIJA' : 'EVENT RESERVATION') : t('reservationTitle')}</div>
             <div class="mt2">
+              ${reservationData.reservationCode ? `<div class="row xs"><span>${codeLabel}</span><span><b>${reservationData.reservationCode}</b></span></div>` : ''}
               <div class="row xs"><span>${t('guestLabel')}</span><span><b>${reservationData.guestName}</b></span></div>
               <div class="row xs"><span>${t('dateLabel')}</span><span><b>${formatDate(reservationData.date)}</b></span></div>
               <div class="row xs"><span>${t('timeLabel')}</span><span><b>${reservationData.time}</b></span></div>
               <div class="row xs"><span>${t('seatsLabel')}</span><span><b>${reservationData.numberOfGuests}</b></span></div>
-              ${reservationData.tableNumber ? `<div class="row xs"><span>${t('tableLabel')}</span><span>${reservationData.tableNumber}</span></div>` : ''}
-              ${reservationData.serviceType ? `<div class="row xs"><span>${t('serviceLabel')}</span><span>${reservationData.serviceType}</span></div>` : ''}
+              ${tableDisplay ? `<div class="row xs"><span>${t('tableLabel')}</span><span>${tableDisplay}</span></div>` : ''}
+              ${serviceDisplay ? `<div class="row xs"><span>${t('serviceLabel')}</span><span>${serviceDisplay}</span></div>` : ''}
+              ${reservationData.zoneName ? `<div class="row xs"><span>${locale === 'sr-RS' ? 'Zona' : 'Zone'}</span><span>${reservationData.zoneName}</span></div>` : ''}
             </div>
-            ${reservationData.additionalRequirements ? `
+            ${notesDisplay ? `
               <div class="sep"></div>
-              <div class="xs"><div class="bold mt1">${t('notesLabel')}</div>${reservationData.additionalRequirements.replace(/\n/g, '<br/>')}</div>
+              <div class="xs"><div class="bold mt1">${t('notesLabel')}</div>${notesDisplay.replace(/\n/g, '<br/>')}</div>
             ` : ''}
             <div class="sep mt3"></div>
             <div class="center xs">
@@ -211,6 +236,14 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             
             {/* Reservation Details */}
             <div className="space-y-1 text-xs">
+              {/* Reservation Code (for event reservations) */}
+              {reservationData.reservationCode && (
+                <div className="flex justify-between">
+                  <span>{currentLanguage === 'srb' ? 'Kod:' : 'Code:'}</span>
+                  <span className="font-bold">{reservationData.reservationCode}</span>
+                </div>
+              )}
+              
               <div className="flex justify-between">
                 <span>{t('guestLabel')}</span>
                 <span>{reservationData.guestName}</span>
@@ -230,14 +263,24 @@ const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 <span>{t('seatsLabel')}</span>
                 <span>{reservationData.numberOfGuests}</span>
               </div>
-              
-              {reservationData.tableNumber && (
+
+              {/* Zone - moved after Seats for both regular and event reservations */}
+              {reservationData.zoneName && (
                 <div className="flex justify-between">
-                  <span>{t('tableLabel')}</span>
-                  <span>{reservationData.tableNumber}</span>
+                  <span>{currentLanguage === 'srb' ? 'Zona:' : 'Zone:'}</span>
+                  <span>{reservationData.zoneName}</span>
                 </div>
               )}
               
+              {/* Table number - support both single string and array */}
+              {(reservationData.tableNumber || (reservationData.tableNumbers && reservationData.tableNumbers.length > 0)) && (
+                <div className="flex justify-between">
+                  <span>{t('tableLabel')}</span>
+                  <span>{reservationData.tableNumber || reservationData.tableNumbers?.join(', ')}</span>
+                </div>
+              )}
+              
+              {/* Service type - only service label, without additional notes */}
               {reservationData.serviceType && (
                 <div className="flex justify-between">
                   <span>{t('serviceLabel')}</span>
