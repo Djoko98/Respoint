@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ResPoint",
-  "version": "0.1.61",
+  "version": "0.1.62",
   "identifier": "com.respoint.app",
   "build": {
     "frontendDist": "../dist",
@@ -40,7 +40,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "upgradeCode": "F5E5BC8A-4F6B-4D8A-9B6C-3A7D9E5F4B2C"
+      }
+    }
   },
   "plugins": {
     "updater": {
@@ -51,6 +56,13 @@
       ],
       "windows": {
         "installMode": "quiet"
+      }
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "respoint"
+        ]
       }
     }
   }
