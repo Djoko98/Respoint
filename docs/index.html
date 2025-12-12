@@ -212,6 +212,13 @@
             <span class="logo-text">ResPoint</span>
         </div>
         
+        <!-- Deep Link Redirect Notice -->
+        <div id="deep-link-notice" class="hidden" style="margin-bottom: 16px; padding: 12px 16px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px;">
+            <p style="font-size: 13px; color: #93c5fd; margin: 0;">
+                <span id="deep-link-status">Opening ResPoint app...</span>
+            </p>
+        </div>
+        
         <!-- Email Verified View -->
         <div id="verified-view" class="hidden">
             <div class="icon icon-success">
@@ -226,6 +233,9 @@
                     You can now <strong>close this window</strong> and return to the <strong>ResPoint app</strong> to log in with your credentials.
                 </p>
             </div>
+            <p id="app-link-fallback" class="hidden" style="margin-top: 16px; font-size: 13px; color: #9ca3af;">
+                If the app didn't open automatically, please launch ResPoint manually.
+            </p>
         </div>
         
         <!-- Password Reset View (with form) -->
@@ -270,16 +280,20 @@
             <h1>Password Reset Link Verified</h1>
             <p class="subtitle">Your password reset request has been confirmed.</p>
             
+            <button id="open-app-btn" class="btn btn-primary" style="margin-bottom: 20px;" onclick="openResPointApp()">
+                Open ResPoint App
+            </button>
+            
             <div class="instruction instruction-blue">
                 <p>
-                    To complete the password reset, please <strong>open the ResPoint app</strong> and log in with your email. 
-                    You will be prompted to set a new password.
+                    Click the button above to open <strong>ResPoint</strong> and set your new password.
+                    If the app doesn't open, make sure it's installed on your computer.
                 </p>
             </div>
             
-            <div style="margin-top: 16px; padding: 16px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; text-align: left;">
-                <p style="font-size: 13px; color: #9ca3af; margin-bottom: 8px;">Or try logging in with your current password - if you remember it, you can change it in Account Settings.</p>
-            </div>
+            <p id="app-link-fallback-recovery" style="margin-top: 16px; font-size: 13px; color: #9ca3af;">
+                Note: The app must be installed (not running in development mode) for the link to work.
+            </p>
         </div>
         
         <!-- Error View -->
@@ -462,8 +476,107 @@
             }
         });
         
+        // Build the deep link URL for opening the app
+        function buildDeepLinkUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const flow = params.get('flow') || 'confirm';
+            
+            // Build the source URL (current full URL) to pass to the app
+            const currentUrl = window.location.href;
+            const encodedUrl = encodeURIComponent(currentUrl);
+            
+            // Build deep link URL
+            const deepLinkPath = flow === 'recovery' ? 'auth/recovery' : 'auth/confirm';
+            return `respoint://${deepLinkPath}?src=${encodedUrl}`;
+        }
+        
+        // Manual button click handler to open the app
+        function openResPointApp() {
+            const deepLinkUrl = buildDeepLinkUrl();
+            console.log('Opening deep link via button:', deepLinkUrl);
+            
+            const btn = document.getElementById('open-app-btn');
+            if (btn) {
+                btn.textContent = 'Opening...';
+                btn.disabled = true;
+            }
+            
+            // Try to open the deep link
+            window.location.href = deepLinkUrl;
+            
+            // Reset button after a delay
+            setTimeout(() => {
+                if (btn) {
+                    btn.textContent = 'Open ResPoint App';
+                    btn.disabled = false;
+                }
+            }, 2000);
+        }
+        
+        // Attempt to open the ResPoint desktop app via deep link (auto)
+        function attemptDeepLinkOpen() {
+            // Show the deep link notice
+            const notice = document.getElementById('deep-link-notice');
+            const status = document.getElementById('deep-link-status');
+            const fallback = document.getElementById('app-link-fallback');
+            
+            if (notice) {
+                notice.classList.remove('hidden');
+                status.textContent = 'Opening ResPoint app...';
+            }
+            
+            const deepLinkUrl = buildDeepLinkUrl();
+            console.log('Attempting to open deep link:', deepLinkUrl);
+            
+            // Track if page visibility changes (indicates app opened)
+            let appOpened = false;
+            const visibilityHandler = () => {
+                if (document.hidden) {
+                    appOpened = true;
+                    if (status) status.textContent = 'ResPoint app opened!';
+                }
+            };
+            document.addEventListener('visibilitychange', visibilityHandler);
+            
+            // Try to open the deep link using various methods
+            
+            // Method 1: Hidden iframe (works on some browsers)
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            
+            try {
+                iframe.contentWindow.location.href = deepLinkUrl;
+            } catch (e) {
+                console.log('Iframe approach failed:', e);
+            }
+            
+            // Method 2: Direct window.location (fallback)
+            setTimeout(() => {
+                window.location.href = deepLinkUrl;
+            }, 100);
+            
+            // Clean up and show fallback message if app didn't open
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+                document.removeEventListener('visibilitychange', visibilityHandler);
+                
+                if (!appOpened) {
+                    if (status) status.textContent = 'If the app didn\'t open, please launch ResPoint manually.';
+                    if (fallback) fallback.classList.remove('hidden');
+                    
+                    // Also show fallback for recovery view
+                    const recoveryFallback = document.getElementById('app-link-fallback-recovery');
+                    if (recoveryFallback) recoveryFallback.classList.remove('hidden');
+                }
+            }, 3000);
+        }
+        
         // Run on page load
         handleCallback();
+        
+        // Attempt to open the app after a brief delay (allows page to render first)
+        setTimeout(attemptDeepLinkOpen, 500);
     </script>
 </body>
 </html>
