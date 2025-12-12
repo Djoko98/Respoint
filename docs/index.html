@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Verified - ResPoint</title>
+    <title>ResPoint - Email Verification</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * {
             margin: 0;
@@ -48,18 +49,26 @@
             letter-spacing: 0.02em;
             color: #f9fafb;
         }
-        .success-icon {
+        .icon {
             width: 80px;
             height: 80px;
             margin: 0 auto 24px;
-            background: linear-gradient(135deg, #22c55e, #10b981);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+        .icon-success {
+            background: linear-gradient(135deg, #22c55e, #10b981);
             animation: pulse 2s infinite;
         }
-        .success-icon svg {
+        .icon-password {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+        }
+        .icon-error {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        .icon svg {
             width: 40px;
             height: 40px;
             stroke: white;
@@ -89,6 +98,14 @@
             padding: 20px;
             margin-bottom: 24px;
         }
+        .instruction-blue {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .instruction-red {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
         .instruction p {
             font-size: 14px;
             color: #d1d5db;
@@ -97,9 +114,94 @@
         .instruction strong {
             color: #22c55e;
         }
+        .instruction-blue strong {
+            color: #3b82f6;
+        }
+        .instruction-red strong {
+            color: #ef4444;
+        }
         .footer {
             font-size: 12px;
             color: #6b7280;
+        }
+        .hidden {
+            display: none;
+        }
+        /* Password reset form styles */
+        .form-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            color: #9ca3af;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            color: #f9fafb;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            border-color: #3b82f6;
+        }
+        .form-group input::placeholder {
+            color: #64748b;
+        }
+        .btn {
+            width: 100%;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #22c55e, #3b82f6);
+            color: #0b1120;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(34, 197, 94, 0.3);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .error-text {
+            color: #ef4444;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .success-text {
+            color: #22c55e;
+            font-size: 14px;
+            margin-top: 16px;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #0b1120;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -110,31 +212,231 @@
             <span class="logo-text">ResPoint</span>
         </div>
         
-        <div class="success-icon">
-            <svg viewBox="0 0 24 24">
-                <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
+        <!-- Email Verified View -->
+        <div id="verified-view" class="hidden">
+            <div class="icon icon-success">
+                <svg viewBox="0 0 24 24">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            </div>
+            <h1>Email Verified!</h1>
+            <p class="subtitle">Your email has been successfully confirmed.</p>
+            <div class="instruction">
+                <p>
+                    You can now <strong>close this window</strong> and return to the <strong>ResPoint app</strong> to log in with your credentials.
+                </p>
+            </div>
         </div>
         
-        <h1>Email Verified!</h1>
-        <p class="subtitle">Your email has been successfully confirmed.</p>
-        
-        <div class="instruction">
-            <p>
-                You can now <strong>close this window</strong> and return to the <strong>ResPoint app</strong> to log in with your credentials.
+        <!-- Password Reset View -->
+        <div id="password-reset-view" class="hidden">
+            <div class="icon icon-password">
+                <svg viewBox="0 0 24 24">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+            </div>
+            <h1>Reset Your Password</h1>
+            <p class="subtitle">Enter your new password below.</p>
+            
+            <form id="reset-form">
+                <div class="form-group">
+                    <label for="new-password">New Password</label>
+                    <input type="password" id="new-password" placeholder="Enter new password" minlength="6" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm Password</label>
+                    <input type="password" id="confirm-password" placeholder="Confirm new password" minlength="6" required>
+                </div>
+                <p id="password-error" class="error-text hidden"></p>
+                <button type="submit" class="btn btn-primary" id="reset-btn">
+                    Reset Password
+                </button>
+            </form>
+            
+            <p id="reset-success" class="success-text hidden">
+                ✓ Password updated successfully! You can now close this window and log in to ResPoint with your new password.
             </p>
+        </div>
+        
+        <!-- Error View -->
+        <div id="error-view" class="hidden">
+            <div class="icon icon-error">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                </svg>
+            </div>
+            <h1>Something Went Wrong</h1>
+            <p class="subtitle" id="error-message">An error occurred during the process.</p>
+            <div class="instruction instruction-red">
+                <p>
+                    Please <strong>try again</strong> or contact support if the problem persists.
+                </p>
+            </div>
+        </div>
+        
+        <!-- Loading View -->
+        <div id="loading-view">
+            <div class="icon icon-password" style="animation: pulse 1.5s infinite;">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10"></circle>
+                </svg>
+            </div>
+            <h1>Processing...</h1>
+            <p class="subtitle">Please wait while we verify your request.</p>
         </div>
         
         <p class="footer">© 2025 ResPoint. All rights reserved.</p>
     </div>
     
     <script>
-        // Try to detect if this is a callback with tokens
-        if (window.location.hash && window.location.hash.includes('access_token')) {
-            console.log('Auth callback detected');
-            // The email is verified, user can close this and go to the app
+        // Initialize Supabase client
+        const SUPABASE_URL = 'https://jxqqptqlvtmlyuaiijvc.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4cXFwdHFsdnRtbHl1YWlpanZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAyMzkyNjMsImV4cCI6MjA2NTgxNTI2M30.qCuYHdUr-7iQZZPof_R8AznMy2jJ0nrKXOY4IXf2oiE';
+        
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        // DOM elements
+        const verifiedView = document.getElementById('verified-view');
+        const passwordResetView = document.getElementById('password-reset-view');
+        const errorView = document.getElementById('error-view');
+        const loadingView = document.getElementById('loading-view');
+        const errorMessage = document.getElementById('error-message');
+        const resetForm = document.getElementById('reset-form');
+        const passwordError = document.getElementById('password-error');
+        const resetSuccess = document.getElementById('reset-success');
+        const resetBtn = document.getElementById('reset-btn');
+        
+        function showView(view) {
+            verifiedView.classList.add('hidden');
+            passwordResetView.classList.add('hidden');
+            errorView.classList.add('hidden');
+            loadingView.classList.add('hidden');
+            view.classList.remove('hidden');
         }
+        
+        function showError(message) {
+            errorMessage.textContent = message;
+            showView(errorView);
+        }
+        
+        // Parse URL parameters
+        async function handleCallback() {
+            const hash = window.location.hash;
+            const params = new URLSearchParams(window.location.search);
+            const hashParams = new URLSearchParams(hash.substring(1));
+            
+            // Check for error
+            const error = params.get('error') || hashParams.get('error');
+            const errorDescription = params.get('error_description') || hashParams.get('error_description');
+            
+            if (error) {
+                showError(errorDescription || error);
+                return;
+            }
+            
+            // Check for access token (email confirmation or password recovery)
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            const type = hashParams.get('type');
+            
+            // Check for code (PKCE flow)
+            const code = params.get('code');
+            
+            console.log('Callback params:', { accessToken: !!accessToken, type, code: !!code });
+            
+            if (accessToken && refreshToken) {
+                try {
+                    // Set the session
+                    const { data, error: sessionError } = await supabase.auth.setSession({
+                        access_token: accessToken,
+                        refresh_token: refreshToken
+                    });
+                    
+                    if (sessionError) throw sessionError;
+                    
+                    if (type === 'recovery') {
+                        // Password recovery - show reset form
+                        showView(passwordResetView);
+                    } else {
+                        // Email confirmation - show success
+                        showView(verifiedView);
+                    }
+                } catch (err) {
+                    console.error('Session error:', err);
+                    showError(err.message || 'Failed to process authentication');
+                }
+            } else if (code) {
+                // PKCE flow - exchange code for session
+                try {
+                    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+                    
+                    if (exchangeError) throw exchangeError;
+                    
+                    // Check if this is a recovery flow
+                    if (data?.session?.user) {
+                        // For now, assume it's email confirmation
+                        // If user came from password reset email, they'll have recovery type
+                        showView(verifiedView);
+                    }
+                } catch (err) {
+                    console.error('Code exchange error:', err);
+                    showError(err.message || 'Failed to verify your email');
+                }
+            } else {
+                // No auth params - just show verified page (fallback)
+                showView(verifiedView);
+            }
+        }
+        
+        // Handle password reset form submission
+        resetForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const newPassword = document.getElementById('new-password').value;
+            const confirmPassword = document.getElementById('confirm-password').value;
+            
+            // Validate passwords
+            if (newPassword !== confirmPassword) {
+                passwordError.textContent = 'Passwords do not match';
+                passwordError.classList.remove('hidden');
+                return;
+            }
+            
+            if (newPassword.length < 6) {
+                passwordError.textContent = 'Password must be at least 6 characters';
+                passwordError.classList.remove('hidden');
+                return;
+            }
+            
+            passwordError.classList.add('hidden');
+            resetBtn.disabled = true;
+            resetBtn.innerHTML = '<span class="loading"></span>Updating...';
+            
+            try {
+                const { data, error } = await supabase.auth.updateUser({
+                    password: newPassword
+                });
+                
+                if (error) throw error;
+                
+                // Success!
+                resetForm.classList.add('hidden');
+                resetSuccess.classList.remove('hidden');
+                
+            } catch (err) {
+                console.error('Password update error:', err);
+                passwordError.textContent = err.message || 'Failed to update password';
+                passwordError.classList.remove('hidden');
+                resetBtn.disabled = false;
+                resetBtn.innerHTML = 'Reset Password';
+            }
+        });
+        
+        // Run on page load
+        handleCallback();
     </script>
 </body>
 </html>
-
