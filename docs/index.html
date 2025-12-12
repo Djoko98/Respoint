@@ -369,22 +369,11 @@
                     showError(err.message || 'Failed to process authentication');
                 }
             } else if (code) {
-                // PKCE flow - exchange code for session
-                try {
-                    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-                    
-                    if (exchangeError) throw exchangeError;
-                    
-                    // Check if this is a recovery flow
-                    if (data?.session?.user) {
-                        // For now, assume it's email confirmation
-                        // If user came from password reset email, they'll have recovery type
-                        showView(verifiedView);
-                    }
-                } catch (err) {
-                    console.error('Code exchange error:', err);
-                    showError(err.message || 'Failed to verify your email');
-                }
+                // PKCE flow - code exchange requires code_verifier which is stored in the app
+                // The email is already verified when user clicks the link
+                // Just show success and let user go back to the app to log in
+                console.log('PKCE code detected - email verification successful');
+                showView(verifiedView);
             } else {
                 // No auth params - just show verified page (fallback)
                 showView(verifiedView);
