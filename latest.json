@@ -1,11 +1,11 @@
 {
-  "version": "0.1.64",
+  "version": "0.1.65",
   "notes": "Automatic Release",
-  "pub_date": "2025-12-12T16:40:43.073Z",
+  "pub_date": "2025-12-16T19:01:35.402Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRb2xtTEp1SlVUL3pNOEVJWDREUHV3MzdScERXVGVDbXhTaWFpVjF4NmpqWUlvOW9pQzJ0NDZNelAycXV2MmpyRGQyUnJVVmg4clBQWlBjZ1NEejF6L1k5bmRZNWhRUUFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY1NTU3NjQzCWZpbGU6UmVzUG9pbnRfMC4xLjY0X3g2NC1zZXR1cC5leGUKbnJnZytGR1lGNU5nMm92L2pUZ280ait0cFhnb0FBeEhmTWhOWUZET2tXQlVDRzlvM1JBeEU5QTg4N3BZRWoxaS9tVEFsOENJbUxXS01KbkZNVWcvQXc9PQo=",
-      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.64/ResPoint_0.1.64_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRb2xtTEp1SlVULzlYZHN6VDFXRi9zSkRPUi9vRXFhNEwrdVRadXBJbmJlMEZ5R0VjZGpJZEtnWGhYWDBqeEdzMU0xNGgxTFdYUmcrOW1KUHpKVGZRNnlGaWZCWisvbndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY1OTExNjk1CWZpbGU6UmVzUG9pbnRfMC4xLjY1X3g2NC1zZXR1cC5leGUKOGRRUXdBTm9sblUyYmJla29odGthNHdWaE4rTjJLMVIyaE9NdWpYRW1QejY5enhyK2lEd2c3S3RuWFFqKzNWS3YzQ3NBVHNJVEdWZHE1ajRXcWFWQ2c9PQo=",
+      "url": "https://github.com/Djoko98/Respoint/releases/download/v0.1.65/ResPoint_0.1.65_x64-setup.exe"
     }
   }
 }
